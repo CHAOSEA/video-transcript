@@ -17,6 +17,7 @@ _LOCAL_MEDIA_FALLBACK_CATEGORIES = {
     "proxy_unavailable",
     "extractor_error",
     "network_or_extractor_error",
+    "download_format_unavailable",
 }
 
 

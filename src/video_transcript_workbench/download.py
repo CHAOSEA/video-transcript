@@ -70,6 +70,8 @@ class DownloadedMedia:
     extractor: str | None
     yt_dlp_version: str
     has_video_stream: bool = False
+    download_strategy: str = "yt_dlp_format_selector"
+    fallback_reason: str | None = None
 
     def evidence(self) -> dict[str, Any]:
         result = asdict(self)
@@ -295,7 +297,7 @@ def _safe_file_in_directory(
 
 
 def _format_selector(platform: str) -> str:
-    """Prefer standalone audio; only XHS may fall back to an audio-bearing MP4."""
+    """Prefer standalone audio; XHS also selects an audio-bearing MP4 if needed."""
     selectors = [
         f"bestaudio[protocol={protocol}]" for protocol in ALLOWED_DOWNLOAD_PROTOCOLS
     ]
@@ -308,6 +310,68 @@ def _format_selector(platform: str) -> str:
     return "/".join(selectors)
 
 
+def _youtube_progressive_mp4_selector() -> str:
+    """Select a single HTTPS MP4 carrying both audio and video for a bounded retry."""
+    return "best[acodec!=none][vcodec!=none][ext=mp4][protocol=https]"
+
+
+def _is_youtube_media_http_403(exc: BaseException) -> bool:
+    """Detect a 403 from an HTTPS YouTube media CDN, not page/metadata requests."""
+    current: BaseException | None = exc
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        response = getattr(current, "response", None)
+        response_url = getattr(response, "url", None)
+        status = getattr(response, "status", None) or getattr(current, "status", None)
+        if status == 403 and isinstance(response_url, str):
+            try:
+                parsed = urlsplit(response_url)
+                host = (parsed.hostname or "").casefold().rstrip(".")
+            except ValueError:
+                host = ""
+                parsed = None
+            if (
+                parsed is not None
+                and parsed.scheme.casefold() == "https"
+                and (host == "googlevideo.com" or host.endswith(".googlevideo.com"))
+            ):
+                return True
+        reason = getattr(current, "reason", None)
+        current = current.__cause__ or current.__context__ or (
+            reason if isinstance(reason, BaseException) else None
+        )
+    return False
+
+
+def _is_format_unavailable(exc: BaseException) -> bool:
+    """Recognize yt-dlp's no-matching-format failure without retaining its text."""
+    current: BaseException | None = exc
+    seen: set[int] = set()
+    markers = (
+        "requested format is not available",
+        "requested format not available",
+        "no video formats found",
+        "no formats found",
+    )
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if any(marker in str(current).casefold() for marker in markers):
+            return True
+        reason = getattr(current, "reason", None)
+        current = current.__cause__ or current.__context__ or (
+            reason if isinstance(reason, BaseException) else None
+        )
+    return False
+
+
+def _clear_media_attempt_files(directory: Path) -> None:
+    """Remove only files matching this adapter's fixed, private output prefix."""
+    for path in directory.iterdir():
+        if path.name.startswith("media.") and (path.is_file() or path.is_symlink()):
+            path.unlink()
+
+
 def download_audio_to_directory(
     url: str,
     *,
@@ -317,11 +381,12 @@ def download_audio_to_directory(
     client_factory: Callable[[str, dict[str, Any]], Any] | None = None,
     proxy: str | None = None,
 ) -> DownloadedMedia:
-    """Download one audio-only stream to a caller-owned private temp directory.
+    """Download audio to a caller-owned private temp directory.
 
     The caller owns and must remove ``directory``. Output names never contain
     extractor-provided titles. Network requests use the same per-hop host guard as
     subtitle extraction, while yt-dlp's native downloaders avoid external tools.
+    YouTube gets one progressive HTTPS MP4 retry only after an audio-only HTTP 403.
     """
     validate_download_limits(max_duration_seconds, max_download_bytes)
     proxy = validate_proxy_url(proxy)
@@ -339,7 +404,9 @@ def download_audio_to_directory(
 
     options = _base_options(proxy)
     options.update(javascript_runtime_options())
-    allow_muxed_mp4 = reference.platform == "xiaohongshu"
+    allow_muxed_mp4 = reference.platform in {"xiaohongshu", "youtube"}
+    download_strategy = "yt_dlp_format_selector"
+    fallback_reason: str | None = None
     options.update({
         "format": _format_selector(reference.platform),
         "outtmpl": str(target / "media.%(ext)s"),
@@ -392,6 +459,7 @@ def download_audio_to_directory(
     options["match_filter"] = duration_filter
     options["progress_hooks"] = [progress_hook]
     factory = client_factory or _safe_ytdlp_factory
+    youtube_audio_403: BaseException | None = None
     try:
         with factory(reference.platform, options) as client:
             request_url = reference.request_url or reference.canonical_url
@@ -445,11 +513,43 @@ def download_audio_to_directory(
                         ie_key=reference.extractor_key,
                     )
             else:
-                info = client.extract_info(
-                    request_url,
-                    download=True,
-                    ie_key=reference.extractor_key,
-                )
+                try:
+                    info = client.extract_info(
+                        request_url,
+                        download=True,
+                        ie_key=reference.extractor_key,
+                    )
+                except Exception as exc:
+                    # YouTube sometimes rejects a selected audio-only stream with 403
+                    # while a same-video progressive MP4 remains publicly accessible.
+                    # Retry once with a bounded HTTPS MP4 carrying an audio stream;
+                    # this does not use cookies, alter clients, or weaken TLS/host checks.
+                    if (
+                        reference.platform != "youtube"
+                        or not _is_youtube_media_http_403(exc)
+                    ):
+                        raise
+                    youtube_audio_403 = exc
+        if youtube_audio_403 is not None:
+            _clear_media_attempt_files(target)
+            fallback_options = dict(options)
+            fallback_options["format"] = _youtube_progressive_mp4_selector()
+            try:
+                with factory(reference.platform, fallback_options) as fallback_client:
+                    info = fallback_client.extract_info(
+                        request_url,
+                        download=True,
+                        ie_key=reference.extractor_key,
+                    )
+            except Exception as fallback_exc:
+                if _is_format_unavailable(fallback_exc):
+                    raise DownloadError(
+                        "YouTube 音频流返回 HTTP 403，且该视频没有可用的 HTTPS 合并 MP4 回退格式。",
+                        category="download_format_unavailable",
+                    ) from fallback_exc
+                raise
+            download_strategy = "progressive_mp4_after_audio_http_403"
+            fallback_reason = "http_403_on_audio_only_stream"
     except Exception as exc:
         if limit_state["bytes"]:
             raise DownloadLimitError("下载媒体超过配置的字节上限") from exc
@@ -496,7 +596,7 @@ def download_audio_to_directory(
         raise DownloadLimitError("下载媒体超过配置的字节上限")
     duration, container_format, codec_name, has_video_stream = _inspect_download(media_path)
     if media_path.suffix.casefold() in ALLOWED_MUXED_VIDEO_EXTENSIONS and not has_video_stream:
-        raise UnsupportedDownloadedMedia("小红书 MP4 回退结果不含视频流")
+        raise UnsupportedDownloadedMedia("MP4 回退结果不含视频流")
     if duration > max_duration_seconds:
         raise DownloadLimitError("实际音轨时长超过配置的上限")
 
@@ -511,4 +611,6 @@ def download_audio_to_directory(
         extractor=info.get("extractor_key") or info.get("extractor"),
         yt_dlp_version=_distribution_version("yt-dlp"),
         has_video_stream=has_video_stream,
+        download_strategy=download_strategy,
+        fallback_reason=fallback_reason,
     )

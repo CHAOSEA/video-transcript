@@ -25,6 +25,7 @@ from video_transcript_workbench.download import (
     UnsupportedDownloadedMedia,
     _inspect_download,
     _format_selector,
+    _youtube_progressive_mp4_selector,
     _xhs_duration_from_info,
     _xhs_https_og_video_url,
     download_audio_to_directory,
@@ -324,6 +325,172 @@ class DownloadAdapterTests(unittest.TestCase):
         self.assertEqual([item["format_id"] for item in xhs_muxed], ["muxed-mp4"])
         self.assertEqual(other_muxed, [])
         self.assertEqual([item["format_id"] for item in xhs_audio], ["audio-m4a"])
+
+    def test_youtube_audio_http_403_retries_once_with_progressive_https_mp4(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "source.mp4"
+            write_test_muxed_mp4(source)
+            target = root / "download"
+            target.mkdir()
+            options_seen: list[dict] = []
+            call_count = 0
+
+            class FakeClient:
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *_args):
+                    return False
+
+                def extract_info(self, _url, **kwargs):
+                    nonlocal call_count
+                    call_count += 1
+                    if call_count == 1:
+                        (target / "media.webm").write_bytes(b"partial download")
+                        error = RuntimeError("HTTP Error 403: Forbidden")
+                        error.response = type(
+                            "Response", (), {
+                                "status": 403,
+                                "url": "https://rr1---sn.googlevideo.com/videoplayback",
+                            }
+                        )()
+                        raise error
+                    self.assert_retry = True
+                    self.assert_partial_removed = not (target / "media.webm").exists()
+                    shutil.copyfile(source, target / "media.mp4")
+                    return {
+                        "id": "BaW_jenozKc",
+                        "duration": 1.0,
+                        "extractor_key": "Youtube",
+                        "webpage_url": VIDEO_URL,
+                    }
+
+            def factory(_platform, options):
+                options_seen.append(options)
+                return FakeClient()
+
+            media = download_audio_to_directory(
+                VIDEO_URL,
+                directory=target,
+                client_factory=factory,
+            )
+
+        self.assertEqual(call_count, 2)
+        self.assertEqual(options_seen[0]["format"], _format_selector("youtube"))
+        self.assertEqual(options_seen[1]["format"], _youtube_progressive_mp4_selector())
+        self.assertEqual(media.extension, ".mp4")
+        self.assertTrue(media.has_video_stream)
+        self.assertEqual(media.download_strategy, "progressive_mp4_after_audio_http_403")
+        self.assertEqual(media.fallback_reason, "http_403_on_audio_only_stream")
+        self.assertEqual(media.evidence()["media_kind"], "video_with_audio")
+
+    def test_douyin_access_challenge_does_not_trigger_progressive_retry(self) -> None:
+        url = "https://www.douyin.com/video/7356265095304875264"
+        with tempfile.TemporaryDirectory() as temp:
+            target = Path(temp) / "download"
+            target.mkdir()
+            calls = 0
+
+            class FakeClient:
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *_args):
+                    return False
+
+                def extract_info(self, _url, **_kwargs):
+                    raise RuntimeError("Fresh cookies (not necessarily logged in) are needed")
+
+            def factory(_platform, _options):
+                nonlocal calls
+                calls += 1
+                return FakeClient()
+
+            with self.assertRaises(DownloadError) as caught:
+                download_audio_to_directory(url, directory=target, client_factory=factory)
+
+        self.assertEqual(calls, 1)
+        self.assertEqual(caught.exception.category, "access_or_auth_restricted")
+
+    def test_youtube_403_without_progressive_format_has_specific_safe_error(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            target = Path(temp) / "download"
+            target.mkdir()
+            calls = 0
+
+            class FakeClient:
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *_args):
+                    return False
+
+                def extract_info(self, _url, **_kwargs):
+                    if calls == 1:
+                        error = RuntimeError("HTTP Error 403: Forbidden")
+                        error.response = type(
+                            "Response", (), {
+                                "status": 403,
+                                "url": "https://rr1---sn.googlevideo.com/videoplayback",
+                            }
+                        )()
+                        raise error
+                    raise RuntimeError("Requested format is not available")
+
+            def factory(_platform, _options):
+                nonlocal calls
+                calls += 1
+                return FakeClient()
+
+            with self.assertRaises(DownloadError) as caught:
+                download_audio_to_directory(
+                    VIDEO_URL,
+                    directory=target,
+                    client_factory=factory,
+                )
+
+        self.assertEqual(calls, 2)
+        self.assertEqual(caught.exception.category, "download_format_unavailable")
+        self.assertIn("没有可用的 HTTPS 合并 MP4", str(caught.exception))
+        self.assertNotIn("403: Forbidden", str(caught.exception))
+
+    def test_youtube_metadata_403_does_not_trigger_media_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            target = Path(temp) / "download"
+            target.mkdir()
+            calls = 0
+
+            class FakeClient:
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *_args):
+                    return False
+
+                def extract_info(self, _url, **_kwargs):
+                    raise_error = RuntimeError("HTTP Error 403: Forbidden")
+                    raise_error.response = type(
+                        "Response", (), {
+                            "status": 403,
+                            "url": "https://www.youtube.com/watch?v=BaW_jenozKc",
+                        }
+                    )()
+                    raise raise_error
+
+            def factory(_platform, _options):
+                nonlocal calls
+                calls += 1
+                return FakeClient()
+
+            with self.assertRaises(DownloadError):
+                download_audio_to_directory(
+                    VIDEO_URL,
+                    directory=target,
+                    client_factory=factory,
+                )
+
+        self.assertEqual(calls, 1)
 
     def test_xhs_downloader_accepts_audio_bearing_mp4_and_records_media_kind(self) -> None:
         video_id = "6411cf99000000001300b6d9"
@@ -693,7 +860,8 @@ class DownloadAdapterTests(unittest.TestCase):
         )
         self.assertIsNone(_xhs_duration_from_info({"formats": [{"duration": None}]}))
 
-    def test_other_platforms_reject_muxed_mp4_downloads(self) -> None:
+    def test_douyin_rejects_muxed_mp4_downloads(self) -> None:
+        url = "https://www.douyin.com/video/7356265095304875264"
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             source = root / "source.mp4"
@@ -710,11 +878,15 @@ class DownloadAdapterTests(unittest.TestCase):
 
                 def extract_info(self, _url, **_kwargs):
                     shutil.copyfile(source, target / "media.mp4")
-                    return {"duration": 1.0, "extractor_key": "Youtube"}
+                    return {
+                        "duration": 1.0,
+                        "extractor_key": "Douyin",
+                        "webpage_url": url,
+                    }
 
             with self.assertRaises(DownloadError) as caught:
                 download_audio_to_directory(
-                    VIDEO_URL,
+                    url,
                     directory=target,
                     client_factory=lambda *_args: FakeClient(),
                 )
@@ -1012,6 +1184,31 @@ class WorkflowTests(unittest.TestCase):
         self.assertTrue(evidence["download"]["has_video_stream"])
         self.assertTrue(evidence["workflow"]["asr_executed"])
         self.assertEqual(evidence["workflow"]["final_transcription_source"], "local_asr")
+
+    def test_youtube_muxed_mp4_is_accepted_as_download_fallback_media(self) -> None:
+        factory, _client = subtitle_factory(video_info(duration=1.0))
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "source.mp4"
+            write_test_muxed_mp4(source)
+            result = run_link_transcription(
+                VIDEO_URL,
+                language="zh",
+                config=self.config,
+                output_dir=root / "output",
+                subtitle_client_factory=factory,
+                download_adapter=fake_download_factory(source),
+                asr_runner=fake_asr_success,
+            )
+            evidence = json.loads(
+                (root / "output" / "evidence.json").read_text(encoding="utf-8")
+            )
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(evidence["download"]["extension"], ".mp4")
+        self.assertEqual(evidence["download"]["media_kind"], "video_with_audio")
+        self.assertEqual(
+            evidence["workflow"]["final_transcription_source"], "local_asr"
+        )
 
     def test_no_matching_language_is_preserved_on_asr_success(self) -> None:
         factory, _client = subtitle_factory(video_info(subtitles={"fr": [{"ext": "vtt", "url": "https://www.youtube.com/fr.vtt"}]}))

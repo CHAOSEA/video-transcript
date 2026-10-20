@@ -62,7 +62,7 @@ The transcript, JSON, and analysis text shown above are **fictional format examp
 |---|---|---|
 | YouTube manual subtitles | PASS | Real retrieval; a fallback subtitle format was verified after a specific format failed. |
 | YouTube automatic subtitles | PASS | Real automatic captions were retrieved and remain marked as automatic in evidence. |
-| YouTube no-subtitle audio → local ASR | PASS (completed once; repeatability depends on request context) | The pinned stable version completed the path once through a one-command proxy override. Two stable-version media requests in this run received HTTP 403. The latest nightly downloaded audio, but its full ASR run did not succeed. |
+| YouTube no subtitles → local ASR | PASS (sample-scoped; media requests can fail intermittently) | Stable and nightly builds have both completed real no-subtitle audio downloads and CPU ASR. After an audio-only HTTP 403, the program now makes one bounded attempt to use a platform-provided HTTPS progressive MP4 if available. The MP4 → decode → ASR path was exercised with an injected first-stream 403 on nightly. Stable yt-dlp did not expose a muxed format for the same sample, so this fallback is conditional. The sample had no useful dialogue and is not an accuracy result. |
 | Bilibili audio fallback → local ASR | PASS | Real audio-only download and local CPU transcription. |
 | Bilibili subtitle retrieval | Not tested | No real subtitle success sample is available. |
 | Xiaohongshu HTTPS MP4 → local ASR | PASS (one sample) | One public video completed real retrieval and local transcription; this is not a guarantee for other videos. |
@@ -71,11 +71,11 @@ The transcript, JSON, and analysis text shown above are **fictional format examp
 
 ### Sample coverage
 
-- YouTube: earlier public samples were used for subtitle, parser, and media-transfer diagnostics. Manual subtitle retrieval succeeded on two videos and automatic subtitle retrieval on one. The pinned stable version previously completed the no-subtitle audio-download and CPU ASR path on an openly licensed public video through a process-level proxy override. Two stable-version media requests in this run received HTTP 403. The latest nightly downloaded audio, but its full ASR run did not succeed. This does not measure recognition accuracy.
+- YouTube: earlier public samples verified manual subtitles on two videos and automatic subtitles on one. On 2026-10-20, stable and nightly both completed no-subtitle audio → CPU ASR; two other stable media requests received HTTP 403. The new HTTPS progressive MP4 fallback completed a real download, decode, and ASR run on nightly after the primary 403 was injected locally. The stable extractor did not expose a muxed MP4 for that same video. That animation sample contained no useful dialogue and produced repetitive ASR output, so these runs prove workflow execution, not recognition quality.
 - Bilibili: R0 checked six public videos, and R1 checked three additional public pages for metadata and subtitle tracks. One no-subtitle audio sample completed local ASR; no real subtitle-success sample is available.
 - Xiaohongshu: multiple URL, network, and HTTPS-media diagnostics were run; one public video completed the MP4-to-local-ASR path.
 - Douyin: one public sample was checked without credentials using yt-dlp 2026.8.19 and official nightly 2026.10.10.233141. Both were blocked by a fresh-cookie challenge before metadata; this does not prove that login is required, and online transcription did not complete.
-- The current worktree passes 108 automated regression tests; the v0.3.0 acceptance historically passed 86. Tests include offline and synthetic cases and do not represent real-video samples.
+- The current worktree passes 113 automated regression tests; the v0.3.0 acceptance historically passed 86. Tests include offline and synthetic cases and do not represent real-video samples.
 
 See the [online support matrix](docs/online-support-matrix.md) for sample coverage and user-visible limitations. Public-video checks, successful paths, and automated regression tests are reported separately. **There is no CER benchmark against human-verified references, so this project makes no model-ranking or universal accuracy claim.**
 

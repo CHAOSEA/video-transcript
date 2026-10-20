@@ -138,7 +138,7 @@ def card_output():
 def card_status():
     im, d = base("多轮平台实测，按路径披露", "公开样本检查与自动化回归分别统计，成功结果仍按具体路径说明。", "03 / 03")
     rows = [
-        ("YouTube", "无字幕视频曾完成音轨下载和本地 ASR；其他请求上下文仍出现 403。", "无字幕路径通过", TEAL, MINT),
+        ("YouTube", "无字幕音轨 ASR 已实测；HTTPS MP4 备用路径已实测（首选音轨 403 由测试注入）。", "路径实测", TEAL, MINT),
         ("Bilibili", "R0 检查 6 个视频，R1 再查 3 个页面；1 条无字幕音轨 ASR 成功，字幕未验证。", "ASR 通过", TEAL, MINT),
         ("小红书", "多轮链接、网络和 HTTPS 媒体诊断；1 条公开视频完成 MP4 → ASR。", "端到端通过", TEAL, MINT),
         ("抖音 Douyin", "稳定版和官方 nightly 都在元信息前遇到 fresh-cookie 访问挑战。", "受限", "#9B5B17", PALE_ORANGE),
@@ -153,8 +153,8 @@ def card_status():
         paragraph(d, (106, y + 88), detail, font(20), MUTED, 850, leading=5, max_lines=2)
         y += 177
     rounded(d, (72, 1150, 1008, 1312), 25, fill=DARK)
-    d.text((104, 1178), "108 项自动化回归测试", font=font(26, True), fill=WHITE)
-    paragraph(d, (106, 1226), "测试含合成案例，不等于真实视频数量。ASR 也尚无人工校订 CER 基准。", font(18), "#D8E9E4", 850, leading=4, max_lines=3)
+    d.text((104, 1178), "113 项自动化回归测试", font=font(26, True), fill=WHITE)
+    paragraph(d, (106, 1226), "测试含合成案例，不等于真实视频数量。ASR 尚无人工校订 CER 基准。", font(18), "#D8E9E4", 850, leading=4, max_lines=3)
     return im
 
 

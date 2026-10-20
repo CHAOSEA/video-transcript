@@ -167,7 +167,7 @@ def _validate_private_media(
         raise DownloadError("下载媒体大小为空或超过配置上限", category="download_limit_exceeded")
     duration, container_format, codec_name, has_video_stream = _inspect_download(path)
     if path.suffix.casefold() == ".mp4" and not has_video_stream:
-        raise DownloadError("小红书 MP4 回退结果不含视频流", category="unsupported_media")
+        raise DownloadError("MP4 回退结果不含视频流", category="unsupported_media")
     if duration > max_duration:
         raise DownloadError("实际音轨超过配置时长上限", category="download_limit_exceeded")
     digest = _sha256(path)
@@ -184,6 +184,8 @@ def _validate_private_media(
         "media_kind": "video_with_audio" if has_video_stream else "audio_only",
         "extractor": media.extractor,
         "yt_dlp_version": media.yt_dlp_version,
+        "download_strategy": media.download_strategy,
+        "fallback_reason": media.fallback_reason,
     }
 
 
@@ -312,7 +314,7 @@ def run_link_transcription(
                         private_dir,
                         max_download_bytes,
                         max_duration_seconds,
-                        allow_muxed_mp4=reference.platform == "xiaohongshu",
+                        allow_muxed_mp4=reference.platform in {"xiaohongshu", "youtube"},
                     )
                     asr_executed = True
                     scratch_dir = private_dir / "n1-stage"
