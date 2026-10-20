@@ -8,7 +8,7 @@ import threading
 import unittest
 import wave
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import redirect_stderr
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -25,6 +25,7 @@ from video_transcript_workbench.engine import (
     EngineExecutionError,
     ModelSelectionError,
     OutputConflictError,
+    _model_factory,
     _model_revision,
     resolve_model_reference,
     transcribe_to_artifacts,
@@ -96,6 +97,8 @@ class InputValidationTests(unittest.TestCase):
             {"temperature": float("nan")},
             {"temperature": float("inf")},
             {"temperature": 10**1000},
+            {"device": "metal"},
+            {"vad_filter": 1},
         )
         for options in invalid_options:
             with self.subTest(options=options):
@@ -142,6 +145,127 @@ class ModelSelectionTests(unittest.TestCase):
                 resolve_model_reference(str(missing))
         with self.assertRaises(ModelSelectionError):
             resolve_model_reference("some-user/remote-model")
+
+
+class DeviceSelectionTests(unittest.TestCase):
+    def test_model_factory_passes_selected_device_and_precision(self) -> None:
+        with patch("video_transcript_workbench.engine.WhisperModel") as whisper:
+            _model_factory(
+                "small",
+                device="cuda",
+                compute_type="float16",
+                cpu_threads=4,
+                revision="a" * 40,
+            )
+        options = whisper.call_args.kwargs
+        self.assertEqual(options["device"], "cuda")
+        self.assertEqual(options["compute_type"], "float16")
+        self.assertEqual(options["cpu_threads"], 4)
+        self.assertTrue(options["local_files_only"])
+        self.assertEqual(options["revision"], "a" * 40)
+
+    def test_cpu_is_a_deterministic_int8_baseline(self) -> None:
+        from video_transcript_workbench.device import resolve_device
+
+        plan = resolve_device("cpu")
+        self.assertEqual((plan.device, plan.compute_type), ("cpu", "int8"))
+        self.assertEqual(plan.selection["reason"], "cpu_explicitly_requested")
+
+    def test_auto_selects_cuda_compute_type_reported_by_ctranslate2(self) -> None:
+        from video_transcript_workbench import device
+
+        with patch.object(device, "inspect_cuda", return_value={
+            "available": True,
+            "device_count": 1,
+            "supported_compute_types": ["float16", "int8_float16"],
+            "selected_compute_type": "float16",
+            "reason": "test_probe",
+        }):
+            plan = device.resolve_device("auto")
+        self.assertEqual((plan.device, plan.compute_type), ("cuda", "float16"))
+
+    def test_auto_uses_cpu_when_ctranslate2_cannot_use_cuda(self) -> None:
+        from video_transcript_workbench import device
+
+        with patch.object(device, "inspect_cuda", return_value={
+            "available": False,
+            "device_count": 0,
+            "supported_compute_types": [],
+            "reason": "probe_failed",
+        }):
+            plan = device.resolve_device("auto")
+        self.assertEqual((plan.device, plan.compute_type), ("cpu", "int8"))
+        self.assertEqual(plan.selection["reason"], "cuda_unavailable_cpu_selected")
+
+    def test_explicit_cuda_fails_instead_of_silently_falling_back(self) -> None:
+        from video_transcript_workbench import device
+
+        with patch.object(device, "inspect_cuda", return_value={
+            "available": False,
+            "device_count": 0,
+            "supported_compute_types": [],
+            "reason": "probe_failed",
+        }):
+            with self.assertRaises(device.DeviceSelectionError):
+                device.resolve_device("cuda")
+
+
+class ModelStoreTests(unittest.TestCase):
+    def test_prepare_is_an_explicit_online_operation_and_verifies_files(self) -> None:
+        from video_transcript_workbench.model_store import prepare_model
+
+        with tempfile.TemporaryDirectory() as temp:
+            snapshot = Path(temp) / "snapshots" / ("a" * 40)
+            snapshot.mkdir(parents=True)
+            for name in ("config.json", "model.bin", "tokenizer.json", "vocabulary.txt"):
+                (snapshot / name).write_bytes(b"present")
+            with patch(
+                "faster_whisper.utils.download_model",
+                return_value=str(snapshot),
+            ) as download:
+                status = prepare_model("small")
+        self.assertEqual(status.status, "ready")
+        self.assertEqual(status.revision, "a" * 40)
+        download.assert_called_once_with("small", local_files_only=False, use_auth_token=False)
+
+    def test_verify_reports_incomplete_cache_without_downloading(self) -> None:
+        from video_transcript_workbench.model_store import inspect_model
+
+        with tempfile.TemporaryDirectory() as temp:
+            snapshot = Path(temp) / "snapshot"
+            snapshot.mkdir()
+            (snapshot / "config.json").write_bytes(b"config")
+            with patch(
+                "faster_whisper.utils.download_model",
+                return_value=str(snapshot),
+            ) as download:
+                status = inspect_model("medium")
+        self.assertEqual(status.status, "incomplete")
+        self.assertIn("model.bin", status.missing_files)
+        download.assert_called_once_with("medium", local_files_only=True, use_auth_token=False)
+
+    def test_inspect_model_rejects_untrusted_huggingface_cache_revision(self) -> None:
+        from video_transcript_workbench.model_store import inspect_model
+
+        with tempfile.TemporaryDirectory() as temp:
+            cache_root = Path(temp)
+            model_cache = cache_root / "models--Systran--faster-whisper-small"
+            (model_cache / "refs").mkdir(parents=True)
+            (model_cache / "snapshots").mkdir()
+            (model_cache / "refs" / "main").write_text("../../outside", encoding="utf-8")
+            with (
+                patch("faster_whisper.utils.download_model", side_effect=RuntimeError("offline")),
+                patch("huggingface_hub.constants.HF_HUB_CACHE", str(cache_root)),
+            ):
+                status = inspect_model("small")
+        self.assertEqual(status.status, "incomplete")
+        self.assertEqual(status.missing_files, ("refs/main",))
+
+    def test_model_manager_rejects_arbitrary_hub_repositories(self) -> None:
+        from video_transcript_workbench.model_store import prepare_model
+
+        with self.assertRaises(ValueError):
+            prepare_model("attacker/model")
 
 
 class SegmentAndOutputTests(unittest.TestCase):
@@ -290,6 +414,7 @@ class SegmentAndOutputTests(unittest.TestCase):
         self.assertEqual(serialized["runtime"]["compute_type"], "int8")
         self.assertEqual(serialized["parameters"]["beam_size"], 5)
         self.assertEqual(serialized["segments"][0]["text"], "raw")
+        self.assertEqual(serialized["quality"], {})
 
 
 class EngineBehaviorTests(unittest.TestCase):
@@ -355,11 +480,12 @@ class EngineBehaviorTests(unittest.TestCase):
             self.assertIs(received["factory_options"]["local_files_only"], True)
             self.assertEqual(received["transcribe_options"]["language"], "zh")
             self.assertIs(received["transcribe_options"]["vad_filter"], False)
+            self.assertEqual(received["transcribe_options"]["no_speech_threshold"], 0.6)
             self.assertEqual(received["audio_samples"].shape, (16_000,))
 
             written = json.loads(evidence_path.read_text(encoding="utf-8"))
             self.assertEqual(result.status, "success")
-            self.assertEqual(written["schema_version"], "1.1")
+            self.assertEqual(written["schema_version"], "1.3")
             self.assertNotIn("source", written)
             self.assertEqual(written["audio"]["sha256"], before_hash)
             self.assertEqual(written["audio"]["media_type"], "audio")
@@ -367,10 +493,12 @@ class EngineBehaviorTests(unittest.TestCase):
             self.assertEqual(written["model"]["requested"], "small")
             self.assertIn(written["model"]["revision"]["status"], {"resolved", "unknown"})
             self.assertEqual(written["runtime"]["compute_type"], "int8")
+            self.assertEqual(written["runtime"]["device_requested"], "cpu")
             self.assertTrue(written["runtime"]["cpu_model"])
             self.assertIn("media_decode_seconds", written["timing"])
             self.assertEqual(written["segments"][0]["text"], " 原句一 ")
             self.assertEqual(written["segments"][1]["text"], "<script>alert(1)</script>")
+            self.assertEqual(written["quality"]["assessment"], "text_available")
             self.assertEqual(
                 written["parameters"]["input_max_duration_seconds"],
                 DEFAULT_MAX_AUDIO_DURATION_SECONDS,
@@ -380,6 +508,132 @@ class EngineBehaviorTests(unittest.TestCase):
             self.assertIn(" 原句一 ", markdown)
             self.assertIn("&lt;script&gt;alert\\(1\\)&lt;/script&gt;", markdown)
             self.assertNotIn("<script>", markdown)
+
+    def test_vad_empty_result_is_no_speech_state_not_model_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            audio = root / "sample.wav"
+            output = root / "output"
+            write_test_wav(audio)
+
+            class FakeModel:
+                def transcribe(self, _samples, **options):
+                    self.vad_filter = options["vad_filter"]
+                    return iter(()), SimpleNamespace(language="zh", language_probability=0.9)
+
+            fake = FakeModel()
+            transcript, evidence_path, result = transcribe_to_artifacts(
+                audio,
+                config=RunConfig(model="small", cpu_threads=2, vad_filter=True),
+                output_dir=output,
+                model_factory=lambda *_args, **_kwargs: fake,
+            )
+            evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+            markdown = transcript.read_text(encoding="utf-8")
+
+        self.assertTrue(fake.vad_filter)
+        self.assertEqual(result.status, "no_speech_detected")
+        self.assertEqual(evidence["status"], "no_speech_detected")
+        self.assertEqual(evidence["quality"]["assessment"], "no_speech_detected")
+        self.assertEqual(evidence["segments"], [])
+        self.assertIn("不证明音频中绝对没有语音", markdown)
+        self.assertNotIn("### 00:00", markdown)
+
+    def test_repeated_and_high_no_speech_signals_mark_uncertain_without_deleting_raw_text(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            audio = root / "sample.wav"
+            output = root / "output"
+            write_test_wav(audio)
+
+            class FakeModel:
+                def transcribe(self, _samples, **_options):
+                    return iter([
+                        SimpleNamespace(start=0.0, end=0.4, text="重复原句", no_speech_prob=0.9),
+                        SimpleNamespace(start=0.4, end=0.8, text="重复原句", no_speech_prob=0.9),
+                    SimpleNamespace(start=0.8, end=1.0, text="正常分段保留", no_speech_prob=0.1),
+                    ]), SimpleNamespace(language="zh", language_probability=0.9)
+
+            transcript, evidence_path, result = transcribe_to_artifacts(
+                audio,
+                config=RunConfig(model="small", cpu_threads=2),
+                output_dir=output,
+                model_factory=lambda *_args, **_kwargs: FakeModel(),
+            )
+            evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+            markdown = transcript.read_text(encoding="utf-8")
+
+        self.assertEqual(result.status, "uncertain")
+        self.assertEqual(evidence["status"], "uncertain")
+        self.assertEqual(
+            [item["text"] for item in evidence["segments"]],
+            ["重复原句", "重复原句", "正常分段保留"],
+        )
+        self.assertEqual(evidence["quality"]["review_scope"], "segments")
+        self.assertEqual(evidence["quality"]["affected_segment_indices"], [0, 1])
+        self.assertEqual(evidence["quality"]["affected_segment_count"], 2)
+        self.assertIn("其他分段不会因此自动判错", evidence["quality"]["note"])
+        warning_codes = {item["code"] for item in evidence["quality"]["warnings"]}
+        self.assertEqual(
+            warning_codes,
+            {"model_no_speech_probability_at_threshold", "identical_segment_text_repeated"},
+        )
+        self.assertEqual(markdown.count("重复原句"), 2)
+        self.assertIn("质量提示", markdown)
+
+    def test_empty_result_without_vad_is_uncertain(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            audio = root / "sample.wav"
+            write_test_wav(audio)
+
+            class FakeModel:
+                def transcribe(self, _samples, **_options):
+                    return iter(()), SimpleNamespace(language="zh", language_probability=0.9)
+
+            _transcript, evidence_path, result = transcribe_to_artifacts(
+                audio,
+                config=RunConfig(model="small", cpu_threads=2),
+                output_dir=root / "output",
+                model_factory=lambda *_args, **_kwargs: FakeModel(),
+            )
+            evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(result.status, "uncertain")
+        self.assertEqual(evidence["quality"]["assessment"], "uncertain")
+        self.assertEqual(
+            evidence["quality"]["warnings"][0]["code"],
+            "model_returned_no_usable_text_without_vad",
+        )
+
+    def test_model_timestamp_overrun_is_uncertain_and_raw_segment_is_preserved(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            audio = root / "sample.wav"
+            write_test_wav(audio)
+
+            class FakeModel:
+                def transcribe(self, _samples, **_options):
+                    return iter([
+                        SimpleNamespace(start=0.5, end=1.2, text="保留时间戳原始文本", no_speech_prob=0.1),
+                    ]), SimpleNamespace(language="zh", language_probability=0.9)
+
+            transcript, evidence_path, result = transcribe_to_artifacts(
+                audio,
+                config=RunConfig(model="small", cpu_threads=2),
+                output_dir=root / "output",
+                model_factory=lambda *_args, **_kwargs: FakeModel(),
+            )
+            evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+            markdown = transcript.read_text(encoding="utf-8")
+
+        self.assertEqual(result.status, "uncertain")
+        self.assertEqual(evidence["segments"][0]["end"], 1.2)
+        self.assertIn("segment_timestamp_outside_audio", {
+            warning["code"] for warning in evidence["quality"]["warnings"]
+        })
+        self.assertIn("保留时间戳原始文本", markdown)
+        self.assertIn("质量提示", markdown)
 
     def test_invalid_model_language_probability_is_written_as_null_json(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -523,6 +777,193 @@ class EngineBehaviorTests(unittest.TestCase):
             self.assertEqual(evidence["error"]["type"], "FileExistsError")
             self.assertFalse((output / "transcript.md").exists())
 
+    def test_auto_cuda_failure_retries_same_model_on_cpu_and_records_fallback(self) -> None:
+        from video_transcript_workbench.device import DevicePlan
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            audio = root / "sample.wav"
+            write_test_wav(audio)
+            calls: list[tuple[str, str, str]] = []
+
+            class FakeModel:
+                def transcribe(self, _samples, **_kwargs):
+                    return iter([SimpleNamespace(start=0.0, end=0.5, text="fallback raw")]), SimpleNamespace(
+                        language="zh", language_probability=1.0
+                    )
+
+            def factory(model: str, **kwargs):
+                calls.append((model, kwargs["device"], kwargs["compute_type"]))
+                if kwargs["device"] == "cuda":
+                    raise RuntimeError("cuDNN initialization failed")
+                return FakeModel()
+
+            with patch(
+                "video_transcript_workbench.engine.resolve_device",
+                return_value=DevicePlan(
+                    requested="auto",
+                    device="cuda",
+                    compute_type="float16",
+                    selection={"reason": "cuda_available_to_ctranslate2"},
+                ),
+            ):
+                _transcript, evidence_path, _result = transcribe_to_artifacts(
+                    audio,
+                    config=RunConfig(model="small", cpu_threads=2, device="auto"),
+                    output_dir=root / "output",
+                    model_factory=factory,
+                )
+
+            evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+        self.assertEqual(calls, [("small", "cuda", "float16"), ("small", "cpu", "int8")])
+        self.assertEqual(evidence["model"]["requested"], "small")
+        self.assertEqual(evidence["runtime"]["device_requested"], "auto")
+        self.assertEqual(evidence["runtime"]["device"], "cpu")
+        self.assertEqual(evidence["runtime"]["compute_type"], "int8")
+        self.assertEqual(
+            evidence["runtime"]["device_selection"]["fallback"]["reason"],
+            "cuda_runtime_or_kernel_failure",
+        )
+
+    def test_auto_cuda_inference_oom_retries_same_model_on_cpu(self) -> None:
+        from video_transcript_workbench.device import DevicePlan
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            audio = root / "sample.wav"
+            write_test_wav(audio)
+            calls: list[tuple[str, str]] = []
+
+            class GpuModel:
+                def transcribe(self, _samples, **_kwargs):
+                    raise RuntimeError("CUDA out of memory PRIVATE_PATH_SENTINEL")
+
+            class CpuModel:
+                def transcribe(self, _samples, **_kwargs):
+                    return iter([SimpleNamespace(start=0.0, end=0.5, text="cpu retry")]), SimpleNamespace(
+                        language="zh", language_probability=1.0
+                    )
+
+            def factory(model: str, **kwargs):
+                calls.append((model, kwargs["device"]))
+                return GpuModel() if kwargs["device"] == "cuda" else CpuModel()
+
+            with patch(
+                "video_transcript_workbench.engine.resolve_device",
+                return_value=DevicePlan("auto", "cuda", "float16", {"reason": "cuda_available"}),
+            ):
+                _transcript, evidence_path, _result = transcribe_to_artifacts(
+                    audio,
+                    config=RunConfig(model="small", cpu_threads=2, device="auto"),
+                    output_dir=root / "output",
+                    model_factory=factory,
+                )
+
+            evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+        self.assertEqual(calls, [("small", "cuda"), ("small", "cpu")])
+        self.assertEqual(evidence["runtime"]["device"], "cpu")
+        self.assertEqual(
+            evidence["runtime"]["device_selection"]["fallback"]["phase"],
+            "inference",
+        )
+        self.assertNotIn("PRIVATE_PATH_SENTINEL", json.dumps(evidence))
+
+    def test_auto_large_model_cuda_fallback_warns_before_cpu_retry(self) -> None:
+        from video_transcript_workbench.device import DevicePlan
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            audio = root / "sample.wav"
+            write_test_wav(audio)
+            calls: list[tuple[str, str]] = []
+
+            class CpuModel:
+                def transcribe(self, _samples, **_kwargs):
+                    return iter([SimpleNamespace(start=0.0, end=0.5, text="保留的原始文本")]), SimpleNamespace(
+                        language="zh", language_probability=0.9
+                    )
+
+            def factory(model: str, **kwargs):
+                calls.append((model, kwargs["device"]))
+                if kwargs["device"] == "cuda":
+                    raise RuntimeError("CUDA out of memory")
+                return CpuModel()
+
+            with patch(
+                "video_transcript_workbench.engine.resolve_device",
+                return_value=DevicePlan("auto", "cuda", "float16", {"reason": "cuda_available"}),
+            ), redirect_stderr(io.StringIO()) as stderr:
+                _transcript, evidence_path, result = transcribe_to_artifacts(
+                    audio,
+                    config=RunConfig(model="large-v3", cpu_threads=2, device="auto"),
+                    output_dir=root / "output",
+                    model_factory=factory,
+                )
+            evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(calls, [("large-v3", "cuda"), ("large-v3", "cpu")])
+        self.assertIn("CPU/int8", stderr.getvalue())
+        self.assertIn("不会自动换成较小模型", stderr.getvalue())
+        self.assertEqual(result.status, "success")
+        self.assertEqual(evidence["model"]["requested"], "large-v3")
+
+    def test_explicit_cuda_runtime_error_is_sanitized(self) -> None:
+        from video_transcript_workbench.device import DevicePlan
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            audio = root / "sample.wav"
+            write_test_wav(audio)
+
+            def failing_factory(*_args, **_kwargs):
+                raise RuntimeError("CUDA initialization failed PRIVATE_PATH_SENTINEL")
+
+            with patch(
+                "video_transcript_workbench.engine.resolve_device",
+                return_value=DevicePlan("cuda", "cuda", "float16", {"reason": "cuda_available"}),
+            ):
+                with self.assertRaisesRegex(EngineExecutionError, "详细运行环境信息已省略") as caught:
+                    transcribe_to_artifacts(
+                        audio,
+                        config=RunConfig(model="small", cpu_threads=2, device="cuda"),
+                        output_dir=root / "output",
+                        model_factory=failing_factory,
+                    )
+
+            evidence_text = (root / "output" / "evidence.json").read_text(encoding="utf-8")
+
+        self.assertNotIn("PRIVATE_PATH_SENTINEL", str(caught.exception))
+        self.assertNotIn("PRIVATE_PATH_SENTINEL", evidence_text)
+
+    def test_auto_does_not_retry_cpu_for_a_missing_model(self) -> None:
+        from video_transcript_workbench.device import DevicePlan
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            audio = root / "sample.wav"
+            write_test_wav(audio)
+            devices: list[str] = []
+
+            def factory(_model: str, **kwargs):
+                devices.append(kwargs["device"])
+                raise FileNotFoundError("model.bin is missing")
+
+            with patch(
+                "video_transcript_workbench.engine.resolve_device",
+                return_value=DevicePlan("auto", "cuda", "float16", {"reason": "cuda_available"}),
+            ):
+                with self.assertRaises(EngineExecutionError):
+                    transcribe_to_artifacts(
+                        audio,
+                        config=RunConfig(model="large-v3", cpu_threads=2, device="auto"),
+                        output_dir=root / "output",
+                        model_factory=factory,
+                    )
+            evidence = json.loads((root / "output" / "evidence.json").read_text(encoding="utf-8"))
+        self.assertEqual(devices, ["cuda"])
+        self.assertNotIn("fallback", evidence["runtime"]["device_selection"])
+        self.assertEqual(evidence["model"]["requested"], "large-v3")
+
 
 class CliDurationLimitTests(unittest.TestCase):
     def test_local_cli_has_safe_default_and_bounded_override(self) -> None:
@@ -537,6 +978,7 @@ class CliDurationLimitTests(unittest.TestCase):
             "--max-duration-seconds", str(MAX_AUDIO_DURATION_SECONDS),
         ])
         self.assertEqual(defaults.max_duration_seconds, DEFAULT_MAX_AUDIO_DURATION_SECONDS)
+        self.assertEqual(defaults.device, "auto")
         self.assertEqual(maximum.max_duration_seconds, MAX_AUDIO_DURATION_SECONDS)
         with redirect_stderr(io.StringIO()):
             with self.assertRaises(SystemExit):
@@ -544,6 +986,36 @@ class CliDurationLimitTests(unittest.TestCase):
                     "sample.wav", "--model", "small", "--output-dir", "out",
                     "--max-duration-seconds", str(MAX_AUDIO_DURATION_SECONDS + 1),
                 ])
+
+
+class CliQualityMessageTests(unittest.TestCase):
+    def test_uncertain_cli_message_reports_local_review_scope(self) -> None:
+        from video_transcript_workbench.cli import main as local_cli_main
+
+        evidence = SimpleNamespace(
+            status="uncertain",
+            quality={
+                "review_scope": "segments",
+                "affected_segment_count": 2,
+            },
+            segments=[SimpleNamespace(text="first"), SimpleNamespace(text="second")],
+            to_dict=lambda: {
+                "runtime": {"device": "cuda", "compute_type": "float16", "device_selection": {}}
+            },
+        )
+        output = io.StringIO()
+        with patch(
+            "video_transcript_workbench.engine.transcribe_to_artifacts",
+            return_value=(Path("transcript.md"), Path("evidence.json"), evidence),
+        ), redirect_stdout(output):
+            result = local_cli_main([
+                "sample.wav", "--model", "small", "--output-dir", "out",
+            ])
+
+        self.assertEqual(result, 0)
+        self.assertIn("质量提示涉及 2 个分段", output.getvalue())
+        self.assertIn("优先复核 Evidence 指出的片段", output.getvalue())
+        self.assertIn("实际设备：cuda / float16", output.getvalue())
 
 
 if __name__ == "__main__":

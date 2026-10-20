@@ -37,7 +37,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("url", help="HTTPS YouTube、Bilibili、抖音或小红书单视频链接")
     parser.add_argument("--language", default="zh", choices=("zh", "en", "ja"))
-    parser.add_argument("--model", required=True, help="已缓存模型名（例如 small）或本地模型目录")
+    parser.add_argument(
+        "--model",
+        help="已缓存模型名（例如 small）或本地模型目录；仅当需要本地 ASR 回退时必需",
+    )
+    parser.add_argument(
+        "--device",
+        default="auto",
+        choices=("auto", "cpu", "cuda"),
+        help="auto 先尝试 CTranslate2 可用的 CUDA，否则使用 CPU/int8；默认 auto",
+    )
     parser.add_argument("--output-dir", required=True, type=Path, help="一个新的输出目录")
     parser.add_argument(
         "--proxy",
@@ -45,6 +54,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--cpu-threads", type=int, default=20)
     parser.add_argument("--beam-size", type=int, default=5)
+    parser.add_argument(
+        "--vad-filter",
+        action="store_true",
+        help="ASR 回退时启用 faster-whisper 内置 Silero VAD；低音量语音可能被漏检",
+    )
     parser.add_argument(
         "--max-duration-seconds",
         type=int,
@@ -68,11 +82,17 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        config = RunConfig(
-            model=args.model,
-            language=args.language,
-            cpu_threads=args.cpu_threads,
-            beam_size=args.beam_size,
+        config = (
+            RunConfig(
+                model=args.model,
+                language=args.language,
+                cpu_threads=args.cpu_threads,
+                beam_size=args.beam_size,
+                device=args.device,
+                vad_filter=args.vad_filter,
+            )
+            if args.model
+            else None
         )
         evidence = run_link_transcription(
             args.url,
@@ -90,10 +110,27 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     print(f"状态：{evidence['status']}")
     print(f"证据：{args.output_dir / 'evidence.json'}")
-    if evidence["status"] == "success":
+    if evidence["status"] in {"success", "uncertain"}:
+        if evidence["status"] == "uncertain":
+            quality = evidence.get("quality") or {}
+            affected_count = quality.get("affected_segment_count", 0)
+            if quality.get("review_scope") == "segments" and affected_count:
+                print(
+                    f"本地 ASR 已保留原始分段；质量提示涉及 {affected_count} 个分段，"
+                    "请优先复核 Evidence 指出的片段。"
+                )
+            else:
+                print("本地 ASR 结果带有整体质量提示；原始分段已保留，请按 Evidence 说明复核。")
         print(f"最终来源：{evidence['workflow']['final_transcription_source']}")
+        model_info = evidence.get("model") or {}
+        if model_info:
+            print(f"实际模型与设备：{model_info.get('requested', args.model)} / {model_info.get('device', 'unknown')} / {model_info.get('compute_type', 'unknown')}")
         print(f"逐字稿：{args.output_dir / 'transcript.md'}")
         return 0
+    if evidence["status"] == "no_speech_detected":
+        print("未检测到可用语音；未生成逐字稿文本。详情见 evidence.json。", file=sys.stderr)
+        print(f"证据：{args.output_dir / 'evidence.json'}", file=sys.stderr)
+        return 2
     error = evidence.get("error") or {}
     print(error.get("message", "转录未成功；详情见 evidence.json。"), file=sys.stderr)
     guidance = _local_media_fallback_message(error.get("category"))

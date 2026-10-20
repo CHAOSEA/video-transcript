@@ -61,7 +61,7 @@ def base(title, subtitle, page):
     d.ellipse((890, -160, 1210, 160), fill=MINT)
     rounded(d, (66, 58, 450, 112), 26, fill=WHITE, outline=LINE, width=2)
     d.text((88, 71), "VIDEO TRANSCRIPT", font=font(18, True), fill=INK)
-    d.text((72, 155), "OPEN-SOURCE CLI  ·  V0.3.2", font=font(18, True), fill=TEAL)
+    d.text((72, 155), "BETA CANDIDATE  ·  V0.3.2", font=font(18, True), fill=TEAL)
     paragraph(d, (72, 202), title, font(54, True), INK, 910, leading=7, max_lines=2)
     paragraph(d, (74, 350), subtitle, font(23), MUTED, 900, leading=8, max_lines=2)
     d.line((72, 1380, 1008, 1380), fill=LINE, width=2)
@@ -71,11 +71,11 @@ def base(title, subtitle, page):
 
 
 def card_workflow():
-    im, d = base("视频链接 →\n逐字稿与可选分析", "没有可用字幕且平台允许时，本机 CPU 识别；Codex 可按需另存分析稿。", "01 / 03")
+    im, d = base("视频链接 →\n逐字稿与可选分析", "没有可用字幕且平台允许时，本机用 CPU 或 NVIDIA CUDA 识别；Codex 可按需另存分析稿。", "01 / 03")
     steps = [
         ("01", "输入链接或本地媒体", "YouTube · Bilibili · 小红书 · 抖音"),
         ("02", "先查找可用字幕", "记录字幕语言及人工 / 自动来源。"),
-        ("03", "无字幕时本地识别", "平台允许获取媒体时，再运行 faster-whisper CPU ASR。"),
+        ("03", "无字幕时本地识别", "平台允许获取媒体时，faster-whisper 可用 CPU/int8 或 CUDA 运行。"),
         ("04", "保存逐字稿与证据", "transcript.md + evidence.json；原始分段和参数可回查。"),
         ("05", "按需生成分析稿", "用户提出后，Codex 另存 analysis.md，不改写转录原文。"),
     ]
@@ -153,7 +153,7 @@ def card_status():
         paragraph(d, (106, y + 88), detail, font(20), MUTED, 850, leading=5, max_lines=2)
         y += 177
     rounded(d, (72, 1150, 1008, 1312), 25, fill=DARK)
-    d.text((104, 1178), "113 项自动化回归测试", font=font(26, True), fill=WHITE)
+    d.text((104, 1178), "162 项自动化回归测试", font=font(26, True), fill=WHITE)
     paragraph(d, (106, 1226), "测试含合成案例，不等于真实视频数量。ASR 尚无人工校订 CER 基准。", font(18), "#D8E9E4", 850, leading=4, max_lines=3)
     return im
 

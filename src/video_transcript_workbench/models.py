@@ -67,6 +67,8 @@ class RunConfig:
     beam_size: int = 5
     best_of: int = 5
     temperature: float = 0.0
+    device: str = "cpu"
+    vad_filter: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.model, str) or not self.model.strip():
@@ -75,6 +77,10 @@ class RunConfig:
             "zh", "en", "ja", "auto",
         }:
             raise ValueError("language must be one of: zh, en, ja, auto")
+        if not isinstance(self.device, str) or self.device not in {"auto", "cpu", "cuda"}:
+            raise ValueError("device must be one of: auto, cpu, cuda")
+        if not isinstance(self.vad_filter, bool):
+            raise ValueError("vad_filter must be a boolean")
         if (
             isinstance(self.cpu_threads, bool)
             or not isinstance(self.cpu_threads, int)
@@ -126,6 +132,9 @@ class RunEvidence:
     timing: dict[str, Any] = field(default_factory=dict)
     segments: list[Segment] = field(default_factory=list)
     error: dict[str, str] | None = None
+    device_requested: str = "cpu"
+    device_selection: dict[str, Any] = field(default_factory=dict)
+    quality: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -143,7 +152,9 @@ class RunEvidence:
             },
             "runtime": {
                 "device": self.device,
+                "device_requested": self.device_requested,
                 "compute_type": self.compute_type,
+                "device_selection": self.device_selection,
                 "cpu_model": self.cpu_model,
                 "cpu_threads": self.cpu_threads,
                 "num_workers": self.num_workers,
@@ -156,6 +167,7 @@ class RunEvidence:
             "parameters": self.parameters,
             "software": self.software,
             "timing": self.timing,
+            "quality": self.quality,
             "segments": [segment.to_dict() for segment in self.segments],
             "error": self.error,
         }

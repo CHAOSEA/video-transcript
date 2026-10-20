@@ -5,4 +5,5 @@ include README.en.md
 include DEPENDENCIES.md
 recursive-include docs *.md *.png *.py
 recursive-include tests *.py
+recursive-include tools *.py
 recursive-include .codex *.md *.yaml

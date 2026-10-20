@@ -41,6 +41,14 @@ The real local ASR check used `Systran/faster-whisper-small`, revision `536b0662
 - [Model card](https://huggingface.co/Systran/faster-whisper-small)
 - [faster-whisper upstream](https://github.com/SYSTRAN/faster-whisper)
 
+Model files are intentionally kept outside Git and Python distributions. `video-transcript models prepare {tiny|base|small|medium|large-v3}` explicitly downloads a public model into the standard Hugging Face cache; `models list`, `models verify`, and `models path` inspect the cache without downloading. Transcription itself remains offline and requires an already complete model snapshot. Model preparation uses only the named public Systran model aliases and disables implicit account-token use.
+
+## Hardware acceleration
+
+The CLI defaults to `--device auto`. It queries CTranslate2 for CUDA device visibility and supported compute types, prefers CUDA FP16 when available, and otherwise uses CPU/int8. If CUDA is detected but model initialization or inference fails with a CUDA/GPU runtime error, `auto` retries the same selected model on CPU/int8 and records that fallback in `evidence.json`. `--device cuda` never falls back; `--device cpu` disables GPU use. No model is silently changed.
+
+The local development machine has an NVIDIA GeForce RTX 3060 visible to CTranslate2 4.7.1, which reports FP16 and INT8/FP16 support. Real `small` and `large-v3` CUDA/FP16 inference both completed once on the local smoke sample; this is not a general hardware or accuracy guarantee. faster-whisper's current Windows GPU requirements are documented in its [official GPU instructions](https://github.com/SYSTRAN/faster-whisper#gpu) (compatible NVIDIA driver, CUDA 12 cuBLAS, and cuDNN 9). This project does not bundle CUDA DLLs or install GPU runtimes.
+
 ## Platform and packaging notes
 
 - yt-dlp uses its own platform extractors and media transfer implementation. The project pins yt-dlp 2026.8.19. Stable and official nightly builds completed no-subtitle audio-to-ASR runs on the public sample, while two other stable transfer requests received HTTP 403. YouTube now gets one bounded HTTPS progressive-MP4 attempt after an audio-only 403 when the extractor offers a qualifying format. The fallback completed real download, media validation, and local ASR on nightly after the primary 403 was injected in the test adapter; stable did not expose a muxed format for that same sample. This is conditional compatibility, not a guarantee. The sample had no useful dialogue and does not establish accuracy. Re-check network and format availability whenever yt-dlp is upgraded.

@@ -241,6 +241,8 @@ def render_markdown(
     model_name: str,
     language: str,
     segments: Iterable[Segment],
+    *,
+    quality_notice: str | None = None,
 ) -> str:
     lines = [
         f"# {escape_markdown_text(audio.file_name)} 转录稿",
@@ -254,6 +256,8 @@ def render_markdown(
         "---",
         "",
     ]
+    if quality_notice:
+        lines.extend([f"> 转录质量提示：{escape_markdown_text(quality_notice)}", ""])
     for segment in segments:
         lines.extend([
             f"### {format_timestamp(segment.start)} – {format_timestamp(segment.end)}",

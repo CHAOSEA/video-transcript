@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "video-transcript-workbench"
 version = "0.3.2"
-description = "Video transcription with subtitle retrieval and local CPU ASR when captions are unavailable."
+description = "Video transcription with subtitle retrieval and local CPU/CUDA ASR when captions are unavailable."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"

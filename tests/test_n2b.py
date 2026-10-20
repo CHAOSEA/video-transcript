@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import shutil
 import tempfile
@@ -9,6 +10,7 @@ import wave
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
+from contextlib import redirect_stdout
 
 import av
 import numpy as np
@@ -970,9 +972,33 @@ class WorkflowTests(unittest.TestCase):
                 "--model", "small",
                 "--output-dir", str(Path(temp) / "out"),
                 "--proxy", proxy,
+                "--vad-filter",
             ])
         self.assertEqual(result, 2)
         self.assertEqual(run_link.call_args.kwargs["proxy"], proxy)
+        self.assertTrue(run_link.call_args.kwargs["config"].vad_filter)
+
+    def test_link_cli_uncertain_message_identifies_segment_review_scope(self) -> None:
+        output = io.StringIO()
+        result_evidence = {
+            "status": "uncertain",
+            "quality": {"review_scope": "segments", "affected_segment_count": 1},
+            "workflow": {"final_transcription_source": "local_asr"},
+            "model": {"requested": "small", "device": "cuda", "compute_type": "float16"},
+        }
+        with tempfile.TemporaryDirectory() as temp, patch(
+            "video_transcript_workbench.link_cli.run_link_transcription",
+            return_value=result_evidence,
+        ), redirect_stdout(output):
+            result = link_cli_main([
+                VIDEO_URL,
+                "--model", "small",
+                "--output-dir", str(Path(temp) / "out"),
+            ])
+
+        self.assertEqual(result, 0)
+        self.assertIn("质量提示涉及 1 个分段", output.getvalue())
+        self.assertIn("实际模型与设备：small / cuda / float16", output.getvalue())
 
     def run_workflow(self, root: Path, info: dict, *, payload: bytes = b"", **kwargs):
         factory, client = subtitle_factory(info, payload)
@@ -1040,12 +1066,72 @@ class WorkflowTests(unittest.TestCase):
         self.assertFalse(evidence["workflow"]["asr_executed"])
         self.assertEqual(evidence["segments"][0]["text"], "字幕原句")
         self.assertIn("字幕原句", markdown)
-        self.assertEqual(evidence["schema_version"], "3.0")
+        self.assertEqual(evidence["schema_version"], "3.1")
         self.assertEqual(evidence["subtitle_attempt"]["schema_version"], "2.1")
         self.assertEqual(
             evidence["subtitle_attempt"]["subtitle"]["attempts"][0]["status"],
             "subtitle_success",
         )
+
+    def test_subtitle_success_does_not_require_a_local_model(self) -> None:
+        info = video_info(subtitles={"zh": [{"ext": "vtt", "url": "https://www.youtube.com/sub.vtt"}]})
+        factory, _client = subtitle_factory(info, "WEBVTT\n\n00:00:00.000 --> 00:00:00.800\n字幕原句\n".encode())
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp) / "output"
+            result = run_link_transcription(
+                VIDEO_URL,
+                language="zh",
+                config=None,
+                output_dir=output,
+                subtitle_client_factory=factory,
+                download_adapter=lambda *_args, **_kwargs: self.fail("subtitle success must not download"),
+                asr_runner=lambda *_args, **_kwargs: self.fail("subtitle success must not run ASR"),
+            )
+            evidence = json.loads((output / "evidence.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["model"], None)
+        self.assertFalse(evidence["workflow"]["asr_executed"])
+        self.assertEqual(evidence["workflow"]["final_transcription_source"], "manual_subtitles")
+
+    def test_missing_model_stops_before_media_download_when_subtitles_unavailable(self) -> None:
+        client = FakeSubtitleClient(video_info())
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp) / "output"
+            result = run_link_transcription(
+                VIDEO_URL,
+                language="zh",
+                config=None,
+                output_dir=output,
+                subtitle_client_factory=lambda *_args: client,
+                download_adapter=lambda *_args, **_kwargs: self.fail("must not download without explicit model"),
+                asr_runner=lambda *_args, **_kwargs: self.fail("must not run ASR without explicit model"),
+            )
+            evidence = json.loads((output / "evidence.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["error"]["category"], "model_required")
+        self.assertIn("models recommend", result["error"]["message"])
+        self.assertEqual(evidence["asr_attempt"]["status"], "not_started")
+        self.assertFalse(evidence["workflow"]["asr_executed"])
+        self.assertIsNone(evidence["download"])
+
+    def test_link_cli_allows_omitting_model_for_subtitle_only_attempt(self) -> None:
+        with tempfile.TemporaryDirectory() as temp, patch(
+            "video_transcript_workbench.link_cli.run_link_transcription",
+            return_value={
+                "status": "success",
+                "workflow": {"final_transcription_source": "manual_subtitles"},
+                "model": None,
+            },
+        ) as run_link, redirect_stdout(io.StringIO()):
+            result = link_cli_main([
+                VIDEO_URL,
+                "--output-dir", str(Path(temp) / "out"),
+            ])
+
+        self.assertEqual(result, 0)
+        self.assertIsNone(run_link.call_args.kwargs["config"])
 
     def test_no_subtitles_falls_back_and_preserves_subtitle_failure(self) -> None:
         client = FakeSubtitleClient(video_info())
@@ -1085,6 +1171,68 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(client.calls[0][1], {"download": False, "ie_key": "Youtube"})
         self.assertEqual(captured["url"], VIDEO_URL)
         self.assertFalse(captured["directory"].exists(), "private download dir should be removed")
+
+    def test_uncertain_asr_quality_is_preserved_in_online_result(self) -> None:
+        def uncertain_asr(*_args, **kwargs):
+            result = fake_asr_success(*_args, **kwargs)
+            result["status"] = "uncertain"
+            result["quality"] = {
+                "assessment": "uncertain",
+                "note": "有重复和无语音概率提示，请人工复核。",
+                "warnings": [{"code": "identical_segment_text_repeated"}],
+            }
+            return result
+
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp) / "output"
+            result = run_link_transcription(
+                VIDEO_URL,
+                language="zh",
+                config=self.config,
+                output_dir=output,
+                subtitle_client_factory=lambda *_args: FakeSubtitleClient(video_info()),
+                download_adapter=fake_download_factory(),
+                asr_runner=uncertain_asr,
+            )
+            evidence = json.loads((output / "evidence.json").read_text(encoding="utf-8"))
+            markdown = (output / "transcript.md").read_text(encoding="utf-8")
+
+        self.assertEqual(result["status"], "uncertain")
+        self.assertEqual(evidence["asr_attempt"]["status"], "uncertain")
+        self.assertEqual(evidence["quality"]["assessment"], "uncertain")
+        self.assertIn("转录质量提示", markdown)
+        self.assertEqual(evidence["segments"][0]["text"], "原始 ASR 文本")
+
+    def test_no_speech_asr_result_does_not_create_online_transcript(self) -> None:
+        def no_speech_asr(*_args, **kwargs):
+            result = fake_asr_success(*_args, **kwargs)
+            result["status"] = "no_speech_detected"
+            result["segments"] = []
+            result["quality"] = {
+                "assessment": "no_speech_detected",
+                "note": "VAD 未检测到语音。",
+                "warnings": [{"code": "vad_returned_no_speech_segments"}],
+            }
+            return result
+
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp) / "output"
+            result = run_link_transcription(
+                VIDEO_URL,
+                language="zh",
+                config=self.config,
+                output_dir=output,
+                subtitle_client_factory=lambda *_args: FakeSubtitleClient(video_info()),
+                download_adapter=fake_download_factory(),
+                asr_runner=no_speech_asr,
+            )
+            evidence = json.loads((output / "evidence.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(result["status"], "no_speech_detected")
+        self.assertEqual(evidence["status"], "no_speech_detected")
+        self.assertEqual(evidence["quality"]["assessment"], "no_speech_detected")
+        self.assertEqual(evidence["segments"], [])
+        self.assertFalse((output / "transcript.md").exists())
 
     def test_resolved_douyin_share_link_uses_canonical_video_for_asr_fallback(self) -> None:
         video_id = "6961737553342991651"

@@ -27,6 +27,7 @@ from .download import (
 from .engine import (
     ModelSelectionError,
     resolve_model_reference,
+    validate_managed_model_is_prepared,
     transcribe_to_artifacts,
 )
 from .models import RunConfig, Segment, validate_segment_sequence
@@ -122,6 +123,7 @@ def _render_workflow_markdown(
     subtitle_status: str,
     segments: list[Segment],
     model: dict[str, Any] | None,
+    quality_notice: str | None = None,
 ) -> str:
     safe_title = (title or "（平台未提供标题）").replace("`", "ˋ")
     lines = [
@@ -139,6 +141,9 @@ def _render_workflow_markdown(
             f"- 模型：`{model.get('requested', 'unknown')}`",
             f"- 设备/精度：`{model.get('device', 'unknown')} / {model.get('compute_type', 'unknown')}`",
         ])
+    if quality_notice:
+        lines.append(f"- 转录质量提示：`{quality_notice.replace('`', 'ˋ')}`")
+        lines.append("- 原始 ASR 分段保留，质量信号需要人工复核。")
     lines.extend(["- 原始分段和各阶段详情以同目录 `evidence.json` 为准。", "", "---", ""])
     for segment in segments:
         lines.extend([
@@ -193,7 +198,7 @@ def run_link_transcription(
     url: str,
     *,
     language: str,
-    config: RunConfig,
+    config: RunConfig | None,
     output_dir: str | Path,
     max_duration_seconds: int = DEFAULT_MAX_DURATION_SECONDS,
     max_download_bytes: int = DEFAULT_MAX_DOWNLOAD_BYTES,
@@ -279,9 +284,21 @@ def run_link_transcription(
             "category": subtitle_status,
             "message": "字幕阶段未成功，当前回退策略已停止。",
         }
+    elif config is None:
+        error = {
+            "category": "model_required",
+            "message": (
+                "当前视频没有可用字幕，需要本地 ASR 才能继续。请先运行 "
+                "`video-transcript models recommend --intent quality` 选择模型，"
+                "再用 `--model <模型名>` 重试；未选择模型时不会下载媒体或自动选模。"
+            ),
+        }
+        asr_evidence = {"status": "not_started", "error": error}
     else:
         try:
             resolve_model_reference(config.model)
+            if asr_runner is None:
+                validate_managed_model_is_prepared(config.model)
         except (ModelSelectionError, ValueError) as exc:
             asr_evidence = {
                 "status": "not_started",
@@ -346,7 +363,8 @@ def run_link_transcription(
                                 "status": "failed",
                                 "error": {"category": category, "message": safe_message},
                             }
-                    if asr_evidence.get("status") == "success":
+                    asr_status = asr_evidence.get("status")
+                    if asr_status in {"success", "uncertain"}:
                         try:
                             raw_segments = _segment_dicts(asr_evidence.get("segments"))
                             duration = float(asr_evidence.get("audio", {}).get("duration_seconds") or download_evidence["duration_seconds"])
@@ -354,7 +372,7 @@ def run_link_transcription(
                                 raise ValueError("解码后的音频超过配置时长上限")
                             segments = [Segment(**item) for item in raw_segments]
                             validate_segment_sequence(segments, duration)
-                            if not segments:
+                            if not segments and asr_status == "success":
                                 raise ValueError("本地 ASR 成功状态没有任何分段")
                         except Exception as validation_exc:
                             asr_evidence = {
@@ -369,15 +387,17 @@ def run_link_transcription(
                         model_data = asr_evidence.get("model") or {}
                         runtime_data = asr_evidence.get("runtime") or {}
                         model_info = {
-                            "requested": model_data.get("requested", config.model),
+                            "requested": model_data.get("requested", config.model if config else None),
                             "device": runtime_data.get("device", "cpu"),
                             "compute_type": runtime_data.get("compute_type", "int8"),
                         }
                         actual_language = (asr_evidence.get("language") or {}).get("detected") or language
                         final_source = "local_asr"
-                        status = "success"
+                        status = asr_status
+                    elif asr_status == "no_speech_detected":
+                        status = "no_speech_detected"
                     else:
-                        asr_status = asr_evidence.get("status", "failed")
+                        asr_status = asr_status or "failed"
                         error = asr_evidence.get("error") or {
                             "category": "local_asr_failed",
                             "message": f"本地 ASR 未成功（{asr_status}）。",
@@ -406,7 +426,7 @@ def run_link_transcription(
         canonical_url = reference.canonical_url
 
     evidence = {
-        "schema_version": "3.0",
+        "schema_version": "3.1",
         "run_id": current_run_id,
         "status": status,
         "started_at_utc": started_at,
@@ -435,6 +455,11 @@ def run_link_transcription(
         "subtitle_attempt": subtitle_evidence,
         "download": download_evidence,
         "asr_attempt": asr_evidence or {"status": "not_run"},
+        "quality": (
+            asr_evidence.get("quality")
+            if asr_evidence is not None
+            else {"assessment": "not_assessed", "reason": "subtitle_path_or_asr_not_run"}
+        ),
         "model": model_info,
         "language": actual_language,
         "segments": [segment.to_dict() for segment in segments],
@@ -451,7 +476,8 @@ def run_link_transcription(
     }
 
     markdown = None
-    if status == "success" and reference is not None:
+    if status in {"success", "uncertain"} and reference is not None:
+        asr_quality = (asr_evidence or {}).get("quality") or {}
         markdown = _render_workflow_markdown(
             title=_safe_title(title),
             platform=platform or reference.platform,
@@ -461,6 +487,11 @@ def run_link_transcription(
             subtitle_status=subtitle_status,
             segments=segments,
             model=model_info,
+            quality_notice=(
+                asr_quality.get("note")
+                if status == "uncertain" and isinstance(asr_quality.get("note"), str)
+                else None
+            ),
         )
     _write_online_artifacts(destination, evidence, markdown)
     return evidence
