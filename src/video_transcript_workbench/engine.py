@@ -24,6 +24,7 @@ from faster_whisper import WhisperModel
 from . import __version__
 from .artifacts import (
     AudioInputError,
+    DEFAULT_MAX_AUDIO_DURATION_SECONDS,
     inspect_audio,
     render_markdown,
     write_failure_evidence,
@@ -37,6 +38,8 @@ SUPPORTED_CACHED_MODELS = {
     "medium", "medium.en", "large-v1", "large-v2", "large-v3", "large",
     "turbo",
 }
+
+_SAFE_RUN_ID = re.compile(r"[A-Za-z0-9_-]{1,64}\Z")
 
 
 class EngineError(RuntimeError):
@@ -227,20 +230,29 @@ def transcribe_to_artifacts(
     *,
     config: RunConfig,
     output_dir: str | Path,
-    max_duration_seconds: float | None = None,
+    max_duration_seconds: float = DEFAULT_MAX_AUDIO_DURATION_SECONDS,
     model_factory: Callable[..., Any] | None = None,
     run_id: str | None = None,
 ) -> tuple[Path, Path, RunEvidence]:
     """Transcribe one local media file and write transcript.md plus evidence.json."""
+    current_run_id = uuid.uuid4().hex if run_id is None else run_id
+    if not isinstance(current_run_id, str) or not _SAFE_RUN_ID.fullmatch(current_run_id):
+        raise ValueError("run_id must contain only 1–64 letters, numbers, underscores, or hyphens")
+
     run_started = time.perf_counter()
+    destination = Path(output_dir).expanduser().resolve()
+    transcript_path = destination / "transcript.md"
+    evidence_path = destination / "evidence.json"
+    if transcript_path.exists() or evidence_path.exists():
+        raise OutputConflictError(
+            f"输出目录已包含 N0 结果，拒绝覆盖：{destination}。请指定一个新的空目录。"
+        )
+
     decode_started = time.perf_counter()
     audio = inspect_audio(audio_path, max_duration_seconds=max_duration_seconds)
     media_decode_seconds = time.perf_counter() - decode_started
     model_reference, model_kind = resolve_model_reference(config.model)
-    destination = Path(output_dir).expanduser().resolve()
     destination.mkdir(parents=True, exist_ok=True)
-    transcript_path = destination / "transcript.md"
-    evidence_path = destination / "evidence.json"
     if transcript_path.exists() or evidence_path.exists():
         raise OutputConflictError(
             f"输出目录已包含 N0 结果，拒绝覆盖：{destination}。请指定一个新的空目录。"
@@ -248,7 +260,6 @@ def transcribe_to_artifacts(
     if transcript_path.resolve() == audio.path or evidence_path.resolve() == audio.path:
         raise OutputConflictError("输出路径不能覆盖输入音频")
 
-    current_run_id = run_id or uuid.uuid4().hex
     started_at = _utc_now()
     evidence = _new_evidence(
         audio=audio,
@@ -258,6 +269,7 @@ def transcribe_to_artifacts(
         run_id=current_run_id,
         started_at=started_at,
     )
+    evidence.parameters["input_max_duration_seconds"] = max_duration_seconds
     revision_info = _model_revision(model_reference, model_kind)
     evidence.model_revision = revision_info
     evidence.timing["media_decode_seconds"] = round(media_decode_seconds, 3)
@@ -322,13 +334,18 @@ def transcribe_to_artifacts(
             evidence.language_detected or config.language,
             raw_segments,
         )
-        transcript_path, evidence_path = write_success_artifacts(
-            destination,
-            markdown,
-            evidence,
-        )
+        try:
+            transcript_path, evidence_path = write_success_artifacts(
+                destination,
+                markdown,
+                evidence,
+            )
+        except FileExistsError as exc:
+            raise OutputConflictError(str(exc)) from exc
         return transcript_path, evidence_path, evidence
     except Exception as exc:
+        if isinstance(exc, OutputConflictError):
+            raise
         # No error path may leave success or running status in the evidence.
         evidence.status = "failed"
         evidence.finished_at_utc = _utc_now()
@@ -342,11 +359,15 @@ def transcribe_to_artifacts(
         saved_path: Path | None = None
         try:
             saved_path = write_failure_evidence(destination, evidence)
+        except FileExistsError as save_exc:
+            raise OutputConflictError(
+                f"输出目录已有结果，拒绝覆盖：{destination}"
+            ) from save_exc
         except Exception as save_exc:
             raise EngineExecutionError(
                 f"转录失败：{exc}。失败证据也无法保存：{save_exc}"
             ) from exc
-        if isinstance(exc, (OutputConflictError, AudioInputError, ModelSelectionError)):
+        if isinstance(exc, (AudioInputError, ModelSelectionError)):
             raise
         raise EngineExecutionError(
             f"转录失败：{exc}。详情已写入 `{saved_path}`；未生成 transcript.md。"

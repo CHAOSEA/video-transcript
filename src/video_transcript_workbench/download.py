@@ -394,10 +394,10 @@ def download_audio_to_directory(
                     and str(info.get("id") or "").casefold() == reference.video_id
                     and str(info.get("extractor_key") or info.get("extractor") or "").casefold()
                     == "xiaohongshu"
-                    and isinstance(info.get("formats"), list)
-                    and info["formats"]
                     and not _has_safe_https_media_format(info, reference.platform)
                 ):
+                    if not isinstance(info.get("formats"), list):
+                        info["formats"] = []
                     source_duration = _xhs_duration_from_info(info)
                     if source_duration is None or source_duration > max_duration_seconds:
                         limit_state["duration"] = True

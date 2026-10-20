@@ -40,6 +40,7 @@ After the command exits:
 
 - Confirm success from its exit status and output evidence. Check that `transcript.md` exists and is non-empty for a successful transcript run; check `evidence.json` and its recorded status and method.
 - Do not report success based only on files being present. On failure, report the actual stage/status from evidence or CLI output and the next safe action.
+- If an online request stops at an access check, do not describe it as definitely requiring login unless the evidence explicitly says so. If the user already has media saved through a platform-permitted path, offer the local `video-transcript` command as the next step; never retrieve cookies, use another downloader to evade the check, or claim that local import proves online support.
 - Report output paths, selected method (manual subtitle, automatic subtitle, or local ASR), and model/device when available. Do not paste the full transcript unless asked.
 - Never claim a CER score, accuracy ranking, or universal platform compatibility; the project has no human-reference CER benchmark.
 

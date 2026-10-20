@@ -1,17 +1,25 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import tempfile
+import threading
 import unittest
 import wave
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import redirect_stderr
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from video_transcript_workbench.artifacts import (
     AudioInputError,
+    DEFAULT_MAX_AUDIO_DURATION_SECONDS,
+    MAX_AUDIO_DURATION_SECONDS,
     inspect_audio,
     render_markdown,
+    write_success_artifacts,
 )
 from video_transcript_workbench.engine import (
     EngineExecutionError,
@@ -40,6 +48,22 @@ def write_test_wav(path: Path, *, frames: int = 16_000) -> None:
 
 
 class InputValidationTests(unittest.TestCase):
+    def test_rejects_invalid_duration_limits(self) -> None:
+        invalid_values = (
+            0,
+            -1,
+            None,
+            True,
+            float("nan"),
+            float("inf"),
+            MAX_AUDIO_DURATION_SECONDS + 1,
+            10**100,
+        )
+        for value in invalid_values:
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    inspect_audio(Path("unused.wav"), max_duration_seconds=value)
+
     def test_rejects_missing_input(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             missing = Path(temp) / "missing.wav"
@@ -138,6 +162,72 @@ class SegmentAndOutputTests(unittest.TestCase):
         self.assertIn(raw_text, markdown)
         self.assertIn("a" * 64, markdown)
 
+    def test_markdown_escapes_untrusted_local_text(self) -> None:
+        markdown = render_markdown(
+            self.audio,
+            "small",
+            "zh",
+            [Segment(0.0, 1.0, "<script>alert(1)</script> [link](javascript:bad())")],
+        )
+        self.assertNotIn("<script>", markdown)
+        self.assertIn("&lt;script&gt;", markdown)
+        self.assertNotIn("[link](javascript:bad())", markdown)
+
+    def test_parallel_writers_never_replace_each_others_artifacts(self) -> None:
+        import video_transcript_workbench.artifacts as artifacts
+
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp) / "output"
+            barrier = threading.Barrier(2)
+            actual_write = artifacts._write_new_text_file
+
+            def synchronized_write(path: Path, text: str) -> None:
+                if path.name == "transcript.md":
+                    barrier.wait(timeout=5)
+                actual_write(path, text)
+
+            def build_evidence(run_id: str) -> RunEvidence:
+                return RunEvidence(
+                    schema_version="1.0",
+                    run_id=run_id,
+                    status="success",
+                    started_at_utc="2026-01-01T00:00:00+00:00",
+                    finished_at_utc="2026-01-01T00:00:01+00:00",
+                    audio=self.audio,
+                    model_requested="small",
+                    model_kind="local_hub_cache_alias",
+                    device="cpu",
+                    compute_type="int8",
+                    cpu_model="test-cpu",
+                    cpu_threads=1,
+                    num_workers=1,
+                    language_requested="zh",
+                    language_detected="zh",
+                    language_probability=1.0,
+                    parameters={},
+                    software={},
+                )
+
+            def write_one(run_id: str) -> tuple[str, str]:
+                try:
+                    write_success_artifacts(
+                        output,
+                        f"text from {run_id}",
+                        build_evidence(run_id),
+                    )
+                    return "written", run_id
+                except FileExistsError:
+                    return "conflict", run_id
+
+            with patch.object(artifacts, "_write_new_text_file", synchronized_write):
+                with ThreadPoolExecutor(max_workers=2) as pool:
+                    results = list(pool.map(write_one, ("run-a", "run-b")))
+
+            self.assertEqual(sum(state == "written" for state, _ in results), 1)
+            self.assertEqual(sum(state == "conflict" for state, _ in results), 1)
+            evidence = json.loads((output / "evidence.json").read_text(encoding="utf-8"))
+            self.assertEqual((output / "transcript.md").read_text(encoding="utf-8"), f"text from {evidence['run_id']}")
+
     def test_evidence_contains_runtime_parameters_and_segments(self) -> None:
         evidence = RunEvidence(
             schema_version="1.0",
@@ -208,7 +298,7 @@ class EngineBehaviorTests(unittest.TestCase):
                     received["transcribe_options"] = kwargs
                     return iter([
                         SimpleNamespace(start=0.0, end=0.4, text=" 原句一 "),
-                        SimpleNamespace(start=0.4, end=0.9, text="原句二。"),
+                        SimpleNamespace(start=0.4, end=0.9, text="<script>alert(1)</script>"),
                     ]), SimpleNamespace(language="zh", language_probability=0.99)
 
             def fake_factory(model: str, **kwargs):
@@ -246,10 +336,16 @@ class EngineBehaviorTests(unittest.TestCase):
             self.assertTrue(written["runtime"]["cpu_model"])
             self.assertIn("media_decode_seconds", written["timing"])
             self.assertEqual(written["segments"][0]["text"], " 原句一 ")
-            self.assertEqual(written["segments"][1]["text"], "原句二。")
+            self.assertEqual(written["segments"][1]["text"], "<script>alert(1)</script>")
+            self.assertEqual(
+                written["parameters"]["input_max_duration_seconds"],
+                DEFAULT_MAX_AUDIO_DURATION_SECONDS,
+            )
             markdown = transcript.read_text(encoding="utf-8")
             self.assertIn("00:00:00.000 – 00:00:00.400", markdown)
             self.assertIn(" 原句一 ", markdown)
+            self.assertIn("&lt;script&gt;alert\\(1\\)&lt;/script&gt;", markdown)
+            self.assertNotIn("<script>", markdown)
 
     def test_existing_output_is_not_overwritten(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -270,6 +366,123 @@ class EngineBehaviorTests(unittest.TestCase):
                     model_factory=should_not_run,
                 )
             self.assertEqual(existing.read_text(encoding="utf-8"), "keep this")
+
+    def test_invalid_run_id_is_rejected_before_decoding_or_writing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            audio = root / "sample.wav"
+            write_test_wav(audio)
+            output = root / "output"
+            for invalid_run_id in ("../outside", "", 0):
+                with self.subTest(run_id=invalid_run_id):
+                    with patch("video_transcript_workbench.engine.inspect_audio") as inspect:
+                        with self.assertRaisesRegex(ValueError, "run_id"):
+                            transcribe_to_artifacts(
+                                audio,
+                                config=RunConfig(model="small", cpu_threads=2),
+                                output_dir=output,
+                                run_id=invalid_run_id,
+                            )
+                    inspect.assert_not_called()
+            self.assertFalse(output.exists())
+
+    def test_concurrent_same_output_reports_conflict_without_failure_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            audio = root / "sample.wav"
+            write_test_wav(audio)
+            output = root / "output"
+            barrier = threading.Barrier(2)
+
+            class FakeModel:
+                def transcribe(self, _audio, **_kwargs):
+                    barrier.wait(timeout=5)
+                    return iter([SimpleNamespace(start=0.0, end=0.5, text="same input")]), SimpleNamespace(
+                        language="zh", language_probability=1.0
+                    )
+
+            def run_one(run_id: str) -> str:
+                try:
+                    transcribe_to_artifacts(
+                        audio,
+                        config=RunConfig(model="small", cpu_threads=2),
+                        output_dir=output,
+                        model_factory=lambda *_args, **_kwargs: FakeModel(),
+                        run_id=run_id,
+                    )
+                    return "success"
+                except (OutputConflictError, FileExistsError):
+                    return "conflict"
+                except Exception as exc:
+                    return f"unexpected:{type(exc).__name__}"
+
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                results = list(pool.map(run_one, ("run-a", "run-b")))
+
+            self.assertCountEqual(results, ["success", "conflict"])
+            self.assertTrue((output / "transcript.md").is_file())
+            self.assertTrue((output / "evidence.json").is_file())
+            self.assertEqual(len(list(output.iterdir())), 2)
+
+    def test_configured_duration_limit_stops_before_model_loading(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            audio = root / "sample.wav"
+            write_test_wav(audio)
+            factory = unittest.mock.Mock()
+            with self.assertRaisesRegex(AudioInputError, "超过限制"):
+                transcribe_to_artifacts(
+                    audio,
+                    config=RunConfig(model="small", cpu_threads=2),
+                    output_dir=root / "output",
+                    max_duration_seconds=0.5,
+                    model_factory=factory,
+                )
+            factory.assert_not_called()
+
+    def test_model_file_exists_error_is_recorded_as_model_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            audio = root / "sample.wav"
+            write_test_wav(audio)
+            output = root / "output"
+
+            def fail_during_model_initialization(*_args, **_kwargs):
+                raise FileExistsError("model initialization conflict")
+
+            with self.assertRaisesRegex(EngineExecutionError, "model initialization conflict"):
+                transcribe_to_artifacts(
+                    audio,
+                    config=RunConfig(model="small", cpu_threads=2),
+                    output_dir=output,
+                    model_factory=fail_during_model_initialization,
+                )
+            evidence = json.loads((output / "evidence.json").read_text(encoding="utf-8"))
+            self.assertEqual(evidence["status"], "failed")
+            self.assertEqual(evidence["error"]["type"], "FileExistsError")
+            self.assertFalse((output / "transcript.md").exists())
+
+
+class CliDurationLimitTests(unittest.TestCase):
+    def test_local_cli_has_safe_default_and_bounded_override(self) -> None:
+        from video_transcript_workbench.cli import build_parser
+
+        parser = build_parser()
+        defaults = parser.parse_args([
+            "sample.wav", "--model", "small", "--output-dir", "out",
+        ])
+        maximum = parser.parse_args([
+            "sample.wav", "--model", "small", "--output-dir", "out",
+            "--max-duration-seconds", str(MAX_AUDIO_DURATION_SECONDS),
+        ])
+        self.assertEqual(defaults.max_duration_seconds, DEFAULT_MAX_AUDIO_DURATION_SECONDS)
+        self.assertEqual(maximum.max_duration_seconds, MAX_AUDIO_DURATION_SECONDS)
+        with redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                parser.parse_args([
+                    "sample.wav", "--model", "small", "--output-dir", "out",
+                    "--max-duration-seconds", str(MAX_AUDIO_DURATION_SECONDS + 1),
+                ])
 
 
 if __name__ == "__main__":

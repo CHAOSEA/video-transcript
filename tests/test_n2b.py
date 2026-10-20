@@ -485,6 +485,67 @@ class DownloadAdapterTests(unittest.TestCase):
                 FakeClient(payload), page_url, expected_video_id=video_id
             ))
 
+    def test_xhs_empty_or_missing_formats_still_tries_page_https_media(self) -> None:
+        video_id = "6411cf99000000001300b6d9"
+        page_url = f"https://www.xiaohongshu.com/explore/{video_id}"
+        candidate = "https://sns-video-bd.xhscdn.com/page-video.mp4?sign=private"
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "source.mp4"
+            write_test_muxed_mp4(source)
+
+            for formats_state in ("empty", "missing"):
+                with self.subTest(formats_state=formats_state):
+                    target = root / f"download-{formats_state}"
+                    target.mkdir()
+                    options_seen: dict = {}
+
+                    class FakeClient:
+                        def __enter__(self):
+                            return self
+
+                        def __exit__(self, *_args):
+                            return False
+
+                        def extract_info(self, _url, **kwargs):
+                            assert kwargs["download"] is False
+                            info = {
+                                "id": video_id,
+                                "duration": 1.0,
+                                "extractor_key": "XiaoHongShu",
+                                "webpage_url": page_url,
+                            }
+                            if formats_state == "empty":
+                                info["formats"] = []
+                            return info
+
+                        def process_ie_result(self, info, *, download):
+                            assert download is True
+                            assert info["formats"][0]["format_id"] == "xhs-og-video-https"
+                            with YoutubeDL({"quiet": True}) as ydl:
+                                selector = ydl.build_format_selector(options_seen["format"])
+                                selected = list(selector(info))
+                            assert selected[0]["url"] == candidate
+                            shutil.copyfile(source, target / "media.mp4")
+                            info["duration"] = selected[0]["duration"]
+                            return info
+
+                    with patch(
+                        "video_transcript_workbench.download._xhs_https_og_video_url",
+                        return_value=candidate,
+                    ):
+                        media = download_audio_to_directory(
+                            page_url,
+                            directory=target,
+                            client_factory=lambda _platform, options: (
+                                options_seen.update(options) or FakeClient()
+                            ),
+                        )
+                    self.assertEqual(media.extension, ".mp4")
+                    self.assertTrue(media.has_video_stream)
+                    self.assertNotIn("private", json.dumps(media.evidence()))
+
     def test_xhs_og_video_candidate_is_bounded_by_actual_download_size(self) -> None:
         video_id = "6411cf99000000001300b6d9"
         page_url = f"https://www.xiaohongshu.com/explore/{video_id}"
@@ -1024,17 +1085,18 @@ class WorkflowTests(unittest.TestCase):
 
     def test_interrupted_final_write_rolls_back_transcript(self) -> None:
         from video_transcript_workbench.online import _write_online_artifacts
+        import video_transcript_workbench.online as online
 
         with tempfile.TemporaryDirectory() as temp:
             output = Path(temp) / "output"
-            original_replace = Path.replace
+            original_write = online._write_new_text_file
 
-            def fail_evidence_replace(path, target):
-                if Path(target).name == "evidence.json":
+            def fail_evidence_write(path, text):
+                if Path(path).name == "evidence.json":
                     raise OSError("simulated disk failure")
-                return original_replace(path, target)
+                return original_write(path, text)
 
-            with patch.object(Path, "replace", fail_evidence_replace):
+            with patch.object(online, "_write_new_text_file", fail_evidence_write):
                 with self.assertRaises(OSError):
                     _write_online_artifacts(
                         output,

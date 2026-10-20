@@ -11,6 +11,24 @@ from .models import RunConfig
 from .workflow import run_link_transcription
 
 
+_LOCAL_MEDIA_FALLBACK_CATEGORIES = {
+    "access_or_auth_restricted",
+    "network_error",
+    "proxy_unavailable",
+    "extractor_error",
+    "network_or_extractor_error",
+}
+
+
+def _local_media_fallback_message(category: str | None) -> str | None:
+    if category not in _LOCAL_MEDIA_FALLBACK_CATEGORIES:
+        return None
+    return (
+        "如果你已通过平台允许的方式保存了视频或音频，可将本地文件交给 "
+        "`video-transcript` 转录；本工具不会读取登录凭据或绕过访问检查。"
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="video-transcript-link",
@@ -70,7 +88,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"最终来源：{evidence['workflow']['final_transcription_source']}")
         print(f"逐字稿：{args.output_dir / 'transcript.md'}")
         return 0
-    print(evidence.get("error", {}).get("message", "转录未成功；详情见 evidence.json。"), file=sys.stderr)
+    error = evidence.get("error") or {}
+    print(error.get("message", "转录未成功；详情见 evidence.json。"), file=sys.stderr)
+    guidance = _local_media_fallback_message(error.get("category"))
+    if guidance and evidence.get("asr_attempt", {}).get("status") in {"not_run", "not_started"}:
+        print(guidance, file=sys.stderr)
     return 2
 
 

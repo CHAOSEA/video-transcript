@@ -25,6 +25,7 @@ from video_transcript_workbench.online import (
 )
 from video_transcript_workbench.models import Segment
 from video_transcript_workbench.online_cli import main as online_cli_main
+from video_transcript_workbench.link_cli import _local_media_fallback_message
 
 
 class UrlValidationTests(unittest.TestCase):
@@ -685,13 +686,31 @@ class OnlineRetrievalTests(unittest.TestCase):
         self.assertEqual(category, "network_error")
         self.assertNotIn("private-url", safe_message)
 
-    def test_cookie_challenge_is_classified_as_access_restriction(self) -> None:
+    def test_cookie_challenge_does_not_claim_login_is_required(self) -> None:
         category, safe_message = _error_category(RuntimeError(
             "Fresh cookies (not necessarily logged in) are needed; token=private"
         ))
         self.assertEqual(category, "access_or_auth_restricted")
-        self.assertNotIn("cookie", safe_message.casefold())
+        self.assertIn("不能证明必须登录", safe_message)
         self.assertNotIn("private", safe_message)
+
+    def test_http_403_does_not_claim_authentication_is_the_cause(self) -> None:
+        category, safe_message = _error_category(RuntimeError("HTTP Error 403: Forbidden"))
+        self.assertEqual(category, "access_or_auth_restricted")
+        self.assertIn("无法判断", safe_message)
+        self.assertNotIn("必须登录", safe_message)
+
+
+class LinkFallbackGuidanceTests(unittest.TestCase):
+    def test_platform_access_failure_offers_only_the_local_media_path(self) -> None:
+        message = _local_media_fallback_message("access_or_auth_restricted")
+        self.assertIsNotNone(message)
+        self.assertIn("video-transcript", message)
+        self.assertIn("平台允许", message)
+        self.assertNotIn("Cookie", message)
+
+    def test_local_asr_failure_does_not_suggest_retrying_the_same_local_file(self) -> None:
+        self.assertIsNone(_local_media_fallback_message("local_asr_failed"))
 
 
 if __name__ == "__main__":

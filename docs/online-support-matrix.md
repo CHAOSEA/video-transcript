@@ -6,7 +6,7 @@ Updated: 2026-10-20. This is a public, sample-scoped compatibility summary. PASS
 |---|---|---|
 | YouTube manual subtitles | PASS | Real sample; Apollo 11 JSON3 failure fell back to a manual VTT track and produced 335 segments. |
 | YouTube automatic subtitles | PASS | A real automatic caption track was retrieved and preserved as automatic in evidence. |
-| YouTube audio fallback when subtitles are unavailable | PASS (one sample) | A public video with no available subtitles completed audio-only download and local small/CPU/int8 ASR using yt-dlp 2026.8.19; one other media-transfer diagnostic remains blocked by an access check. |
+| YouTube audio fallback when subtitles are unavailable | PASS (one sample; recheck was blocked) | A public video with no available subtitles previously completed audio-only download and local small/CPU/int8 ASR using yt-dlp 2026.8.19. A 2026-10-20 recheck of the same sample received HTTP 403 before metadata, so ASR did not start. A different media-transfer diagnostic also remains blocked. |
 | Bilibili audio fallback when subtitles are unavailable | PASS | Real audio-only stream was downloaded and transcribed locally on CPU. |
 | Bilibili manual/automatic subtitle success | NOT TESTED | Tested anonymous public pages did not expose a usable subtitle track; no successful real subtitle sample is claimed. |
 | Douyin manual/automatic subtitle retrieval | BLOCKED | Rechecked 2026-10-20 with yt-dlp 2026.8.19 through the available process-level proxy and without credentials. The extractor returned an access/auth-restricted error before metadata or tracks. Its “fresh cookies” wording does not establish that login is the cause. |
@@ -21,17 +21,17 @@ The following counts summarize the R0/R1 and release checks. A page check, a suc
 
 | Platform | Public sample checks | Verified result |
 |---|---|---|
-| YouTube | Five distinct public videos were used for subtitle, parser, or media-transfer diagnostics. | Manual subtitle retrieval succeeded on two videos and automatic subtitle retrieval on one. One no-subtitle video completed audio download and local ASR with yt-dlp 2026.8.19; one other media-transfer diagnostic stopped at a platform access check. |
+| YouTube | Five distinct public videos were used for subtitle, parser, or media-transfer diagnostics; one previously successful no-subtitle sample was rechecked. | Manual subtitle retrieval succeeded on two videos and automatic subtitle retrieval on one. One no-subtitle video completed audio download and local ASR with yt-dlp 2026.8.19, but a 2026-10-20 recheck of that same sample received HTTP 403 before metadata. A different media-transfer diagnostic also stopped at an access check. The recheck is not a new unique sample. |
 | Bilibili | R0 checked six public videos; R1 checked three additional public pages for metadata and subtitle tracks. | One no-subtitle audio sample completed local ASR. No usable subtitle track was found in these checks, so subtitle-success remains unverified. |
 | Xiaohongshu | Multiple URL, network, page, and HTTPS-media diagnostics were performed. | One public video completed HTTPS MP4 retrieval, audio decoding, and local ASR. |
 | Douyin | A public sample was checked and rechecked through the available anonymous access path using yt-dlp 2026.8.19. | An access/auth-restricted error stopped metadata retrieval; the extractor's fresh-cookie wording does not establish that login is the cause. No online end-to-end ASR passed. |
 
-The release regression suite contains 86 automated tests, including synthetic and offline cases. Those tests are reported separately and do not represent 86 real videos. The real-platform checks above are targeted compatibility checks, not a random or representative market sample. ASR has no CER benchmark against human-verified references.
+The current regression suite contains 98 automated tests, including synthetic and offline cases; the v0.3.0 release acceptance historically ran 86. These tests are reported separately and do not represent real-video sample counts. The real-platform checks above are targeted compatibility checks, not a random or representative market sample. ASR has no CER benchmark against human-verified references.
 
 ## User-visible limitations
 
 - Subtitle availability depends on each video's subtitle tracks and the requested language.
-- YouTube no-subtitle fallback completed on one public sample with yt-dlp 2026.8.19; another media-transfer diagnostic remains blocked by an access check. The program does not use cookies or bypass login, human verification, permission, or regional restrictions.
+- YouTube no-subtitle fallback completed on one public sample with yt-dlp 2026.8.19, but a later recheck of the same sample received HTTP 403 before metadata; another media-transfer diagnostic is also blocked by an access check. This demonstrates that success is not repeatable in every request context. The program does not use cookies or bypass login, human verification, permission, or regional restrictions.
 - Bilibili subtitle success has not yet been verified on a real public sample.
 - The tested Douyin sample remained access-restricted before metadata when rechecked on 2026-10-20 with yt-dlp 2026.8.19. The extractor's fresh-cookie wording does not prove that login is the cause, and this tool will not obtain or use credentials. One Xiaohongshu sample succeeded through a page-provided HTTPS MP4; other videos may expose only HTTP media, no media, or require platform access checks.
 - Xiaohongshu manual/automatic subtitle parsing remains untested on a successful track. The MP4 ASR result is limited to one public sample and is not a universal compatibility or accuracy guarantee.

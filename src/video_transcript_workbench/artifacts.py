@@ -3,7 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+import html
 import json
+import math
+import os
+import re
+import shutil
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
@@ -15,6 +21,52 @@ SUPPORTED_MEDIA_SUFFIXES = {
     ".wav", ".mp3", ".m4a", ".mp4", ".webm", ".ogg", ".opus",
 }
 DECODE_SAMPLE_RATE = 16_000
+DEFAULT_MAX_AUDIO_DURATION_SECONDS = 30 * 60
+MAX_AUDIO_DURATION_SECONDS = 4 * 60 * 60
+
+
+def escape_markdown_text(value: str) -> str:
+    """Render untrusted transcript text inertly while evidence keeps it raw."""
+    escaped = html.escape(value, quote=False)
+    return re.sub(r"([\\`*_{}\[\]()#+\-.!|>])", r"\\\1", escaped)
+
+
+def _write_new_text_file(path: Path, text: str) -> None:
+    """Create a text file without replacing an existing path, including a symlink.
+
+    A private random temporary file is prepared first. Hard-link creation is an
+    atomic no-replace operation on supported local filesystems; the O_EXCL
+    fallback keeps the no-overwrite guarantee on filesystems without hard links.
+    """
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+    )
+    temporary_path = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
+            stream.write(text)
+            stream.flush()
+            os.fsync(stream.fileno())
+        try:
+            os.link(temporary_path, path)
+        except FileExistsError:
+            raise FileExistsError(f"输出文件已存在，拒绝覆盖：{path.name}") from None
+        except OSError:
+            flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_BINARY", 0)
+            try:
+                output_fd = os.open(path, flags, 0o600)
+            except FileExistsError:
+                raise FileExistsError(f"输出文件已存在，拒绝覆盖：{path.name}") from None
+            try:
+                with os.fdopen(output_fd, "wb") as destination, temporary_path.open("rb") as source:
+                    shutil.copyfileobj(source, destination)
+                    destination.flush()
+                    os.fsync(destination.fileno())
+            except Exception:
+                path.unlink(missing_ok=True)
+                raise
+    finally:
+        temporary_path.unlink(missing_ok=True)
 
 
 class AudioInputError(ValueError):
@@ -39,7 +91,7 @@ def _sha256(path: Path) -> str:
 def inspect_audio(
     path: str | Path,
     *,
-    max_duration_seconds: float | None = None,
+    max_duration_seconds: float = DEFAULT_MAX_AUDIO_DURATION_SECONDS,
 ) -> InspectedAudio:
     """Inspect and decode the first audio stream without writing media files.
 
@@ -48,8 +100,20 @@ def inspect_audio(
     and never used to validate ASR segment coverage.
     """
     candidate = Path(path).expanduser()
-    if max_duration_seconds is not None and max_duration_seconds <= 0:
-        raise ValueError("max_duration_seconds must be positive")
+    if (
+        isinstance(max_duration_seconds, bool)
+        or not isinstance(max_duration_seconds, (int, float))
+        or (
+            isinstance(max_duration_seconds, float)
+            and not math.isfinite(max_duration_seconds)
+        )
+        or max_duration_seconds <= 0
+    ):
+        raise ValueError("max_duration_seconds must be a finite positive number")
+    if max_duration_seconds > MAX_AUDIO_DURATION_SECONDS:
+        raise ValueError(
+            f"max_duration_seconds must not exceed {MAX_AUDIO_DURATION_SECONDS}"
+        )
     if not candidate.exists():
         raise AudioInputError(f"媒体文件不存在：{candidate}")
     if not candidate.is_file():
@@ -179,9 +243,9 @@ def render_markdown(
     segments: Iterable[Segment],
 ) -> str:
     lines = [
-        f"# {audio.file_name} 转录稿",
+        f"# {escape_markdown_text(audio.file_name)} 转录稿",
         "",
-        f"- 模型：`{model_name}`",
+        f"- 模型：`{model_name.replace('`', 'ˋ')}`",
         f"- 语言：`{language}`",
         f"- 音频时长：`{audio.duration_seconds:.3f}` 秒",
         f"- 输入 SHA256：`{audio.sha256}`",
@@ -194,7 +258,7 @@ def render_markdown(
         lines.extend([
             f"### {format_timestamp(segment.start)} – {format_timestamp(segment.end)}",
             "",
-            segment.text,
+            escape_markdown_text(segment.text),
             "",
         ])
     return "\n".join(lines)
@@ -214,19 +278,14 @@ def write_success_artifacts(
             f"输出目录已包含转录结果，拒绝覆盖：{output_dir}。请指定一个新的空目录。"
         )
 
-    temp_transcript = output_dir / f".transcript-{evidence.run_id}.tmp"
-    temp_evidence = output_dir / f".evidence-{evidence.run_id}.tmp"
     created: list[Path] = []
     try:
-        temp_transcript.write_text(markdown, encoding="utf-8", newline="\n")
-        temp_evidence.write_text(
-            json.dumps(evidence.to_dict(), ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-            newline="\n",
-        )
-        temp_transcript.replace(transcript_path)
+        _write_new_text_file(transcript_path, markdown)
         created.append(transcript_path)
-        temp_evidence.replace(evidence_path)
+        _write_new_text_file(
+            evidence_path,
+            json.dumps(evidence.to_dict(), ensure_ascii=False, indent=2) + "\n",
+        )
         created.append(evidence_path)
     except Exception:
         for path in created:
@@ -235,9 +294,6 @@ def write_success_artifacts(
             except OSError:
                 pass
         raise
-    finally:
-        temp_transcript.unlink(missing_ok=True)
-        temp_evidence.unlink(missing_ok=True)
     return transcript_path, evidence_path
 
 
@@ -249,14 +305,8 @@ def write_failure_evidence(output_dir: Path, evidence: RunEvidence) -> Path:
         raise FileExistsError(
             f"输出目录已包含转录结果，拒绝覆盖：{output_dir}。请指定一个新的空目录。"
         )
-    temp_path = output_dir / f".evidence-{evidence.run_id}.tmp"
-    try:
-        temp_path.write_text(
-            json.dumps(evidence.to_dict(), ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-            newline="\n",
-        )
-        temp_path.replace(evidence_path)
-    finally:
-        temp_path.unlink(missing_ok=True)
+    _write_new_text_file(
+        evidence_path,
+        json.dumps(evidence.to_dict(), ensure_ascii=False, indent=2) + "\n",
+    )
     return evidence_path

@@ -56,13 +56,13 @@ The transcript, JSON, and analysis text shown above are **fictional format examp
 
 ## Online platform status
 
-![Platform verification scope: multiple public-video checks, successful paths, and access limits; 86 automated regression tests are counted separately](docs/assets/xhs-03-platform-status.png)
+![Platform verification scope: multiple public-video checks, successful paths, and access limits; 98 automated regression tests are counted separately](docs/assets/xhs-03-platform-status.png)
 
 | Platform and path | Status | Verification |
 |---|---|---|
 | YouTube manual subtitles | PASS | Real retrieval; a fallback subtitle format was verified after a specific format failed. |
 | YouTube automatic subtitles | PASS | Real automatic captions were retrieved and remain marked as automatic in evidence. |
-| YouTube no-subtitle audio → local ASR | PASS (one sample) | One video without available subtitles completed audio download and CPU/int8 transcription; another media request remains access-restricted. |
+| YouTube no-subtitle audio → local ASR | PASS (one sample; recheck was blocked) | One video without available subtitles previously completed audio download and CPU/int8 transcription. A 2026-10-20 recheck of the same sample received HTTP 403 before metadata, so ASR did not start. |
 | Bilibili audio fallback → local ASR | PASS | Real audio-only download and local CPU transcription. |
 | Bilibili subtitle retrieval | Not tested | No real subtitle success sample is available. |
 | Xiaohongshu HTTPS MP4 → local ASR | PASS (one sample) | One public video completed real retrieval and local transcription; this is not a guarantee for other videos. |
@@ -71,11 +71,11 @@ The transcript, JSON, and analysis text shown above are **fictional format examp
 
 ### Sample coverage
 
-- YouTube: five distinct public videos were used for subtitle, parser, or media-transfer diagnostics. Manual subtitle retrieval succeeded on two videos and automatic subtitle retrieval on one. One no-subtitle video completed audio download and local ASR with yt-dlp 2026.8.19; one other transfer diagnostic stopped at a platform access check.
+- YouTube: five distinct public videos were used for subtitle, parser, or media-transfer diagnostics. Manual subtitle retrieval succeeded on two videos and automatic subtitle retrieval on one. One no-subtitle video previously completed audio download and local ASR with yt-dlp 2026.8.19, but a 2026-10-20 recheck of the same video received HTTP 403 before metadata. A different transfer diagnostic also stopped at a platform access check; the recheck is not a new unique sample.
 - Bilibili: R0 checked six public videos, and R1 checked three additional public pages for metadata and subtitle tracks. One no-subtitle audio sample completed local ASR; no real subtitle-success sample is available.
 - Xiaohongshu: multiple URL, network, and HTTPS-media diagnostics were run; one public video completed the MP4-to-local-ASR path.
 - Douyin: a public sample was rechecked without credentials using yt-dlp 2026.8.19 and remained access-restricted before metadata; online transcription did not complete.
-- The 86 automated regression tests are counted separately. They include offline and synthetic cases and do not represent 86 real videos.
+- The current 98 automated regression tests are counted separately. They include offline and synthetic cases and do not represent 98 real videos. The 86-test v0.3.0 acceptance is historical.
 
 See the [online support matrix](docs/online-support-matrix.md) for sample coverage and user-visible limitations. Public-video checks, successful paths, and automated regression tests are reported separately. **There is no CER benchmark against human-verified references, so this project makes no model-ranking or universal accuracy claim.**
 
@@ -125,6 +125,8 @@ The command recognizes YouTube, Bilibili, Douyin, and Xiaohongshu video-note URL
 
 URL recognition does not mean every link can be processed. Access permissions, subtitle tracks, region, network, media format, and local resources all affect results. Check the sample-scoped support matrix above.
 
+If an online request is blocked but you already have media saved through a platform-permitted path, continue with the local `video-transcript` command below. The online command does not read browser sessions or bypass access checks.
+
 ### Subtitles only
 
 ~~~powershell
@@ -139,7 +141,7 @@ This command fetches platform metadata and matching subtitles only. It does not 
 video-transcript "D:\media\sample.mp4" --model small --language zh --output-dir "D:\transcripts\local-run-01"
 ~~~
 
-Media is decoded and transcribed locally. For video input, the first audio track is used. The source file is not modified. The selected model must already be available locally; missing files cause a clear error, with no silent download or downgrade.
+Media is decoded and transcribed locally. For video input, the first audio track is used. The source file is not modified. To avoid accidental processing of very long media, local input is limited to 30 minutes by default. Use `--max-duration-seconds` to change the limit, up to four hours. The selected model must already be available locally; missing files cause a clear error, with no silent download or downgrade.
 
 ## Results and privacy
 
@@ -150,7 +152,7 @@ Successful runs create:
 
 Online evidence omits the original query string, signed subtitle URL, and signed media URL. A required share parameter explicitly present in a Xiaohongshu URL is used only during the request and is not written to evidence or safe errors. Result files may contain video titles and full transcripts; treat output folders as private.
 
-The tool does not use cloud ASR, automatically read browser profiles or cookies, or bypass access checks. Online downloads are limited by duration and byte size. Temporary media is removed when processing ends. Local decoding of long media can use substantial memory.
+The tool does not use cloud ASR, automatically read browser profiles or cookies, or bypass access checks. Online downloads are limited by duration and byte size. Temporary media is removed when processing ends. Longer local audio can still use substantial memory.
 
 ## Known limitations
 

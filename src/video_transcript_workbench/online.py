@@ -18,7 +18,11 @@ from typing import Any, Callable
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 from . import __version__
-from .artifacts import format_timestamp
+from .artifacts import (
+    _write_new_text_file,
+    escape_markdown_text as _escape_caption_for_markdown,
+    format_timestamp,
+)
 from .models import Segment
 
 
@@ -664,12 +668,6 @@ def _finite_positive_duration(value: Any) -> float | None:
     return duration if isfinite(duration) and duration > 0 else None
 
 
-def _escape_caption_for_markdown(value: str) -> str:
-    """Keep evidence raw while rendering subtitle text as inert Markdown text."""
-    escaped = html.escape(value, quote=False)
-    return re.sub(r"([\\`*_{}\[\]()#+\-.!|>])", r"\\\1", escaped)
-
-
 def _version(distribution: str) -> str:
     try:
         return version(distribution)
@@ -692,14 +690,26 @@ def _error_category(exc: Exception) -> tuple[str, str]:
         "network is unreachable", "temporary failure in name resolution", "ssl error",
     )):
         return "network_error", "无法连接平台或字幕服务器；没有调整网络设置。"
+    cookie_challenge_markers = (
+        "fresh cookies", "cookies are needed", "cookie required",
+    )
+    if any(marker in message for marker in cookie_challenge_markers):
+        return (
+            "access_or_auth_restricted",
+            "平台的访问检查未通过，具体原因尚未确认；“fresh cookies”提示本身不能证明必须登录。工具不会读取凭据或绕过验证。",
+        )
     restricted_markers = (
         "login required", "sign in", "private video", "members-only", "age-restricted",
         "geo-restricted", "not available in your country", "authentication required",
-        "fresh cookies", "cookies are needed", "cookie required",
-        "http error 401", "http error 403", "status code 401", "status code 403",
+        "http error 401", "status code 401",
     )
     if any(marker in message for marker in restricted_markers):
         return "access_or_auth_restricted", "平台要求登录、权限或地区访问；本工具不会读取或使用凭据。"
+    if any(marker in message for marker in ("http error 403", "status code 403")):
+        return (
+            "access_or_auth_restricted",
+            "平台拒绝了请求；仅凭 403 无法判断是登录、权限、地区策略还是反自动化检查。工具不会读取凭据或绕过验证。",
+        )
     current: BaseException | None = exc
     seen: set[int] = set()
     while current is not None and id(current) not in seen:
@@ -752,27 +762,20 @@ def _write_online_artifacts(
     transcript_path = destination / "transcript.md"
     if evidence_path.exists() or transcript_path.exists():
         raise FileExistsError(f"输出目录已包含结果，拒绝覆盖：{destination}。请指定新的空目录。")
-    evidence_temp = destination / f".evidence-{evidence['run_id']}.tmp"
-    transcript_temp = destination / f".transcript-{evidence['run_id']}.tmp"
     created: list[Path] = []
     try:
-        evidence_temp.write_text(
-            json.dumps(evidence, ensure_ascii=False, indent=2, allow_nan=False) + "\n",
-            encoding="utf-8",
-        )
         if markdown is not None:
-            transcript_temp.write_text(markdown, encoding="utf-8", newline="\n")
-            transcript_temp.replace(transcript_path)
+            _write_new_text_file(transcript_path, markdown)
             created.append(transcript_path)
-        evidence_temp.replace(evidence_path)
+        _write_new_text_file(
+            evidence_path,
+            json.dumps(evidence, ensure_ascii=False, indent=2, allow_nan=False) + "\n",
+        )
         created.append(evidence_path)
     except Exception:
         for path in created:
             path.unlink(missing_ok=True)
         raise
-    finally:
-        evidence_temp.unlink(missing_ok=True)
-        transcript_temp.unlink(missing_ok=True)
     return evidence_path, transcript_path if markdown is not None else None
 
 
