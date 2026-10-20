@@ -15,6 +15,19 @@ Updated: 2026-10-20. This is a public, sample-scoped compatibility summary. PASS
 | Xiaohongshu audio fallback when subtitles are unavailable | PASS (one sample) | Page-provided HTTPS `og:video` MP4 returned 206 `video/mp4` for a 1 KiB range probe; bounded 85,787,212-byte MP4 download then passed PyAV audio/video validation and small/CPU/int8 ASR, producing 408 segments. |
 | Local media CPU transcription | PASS | Windows Python 3.11.9, cached small model, CPU/int8 real run. |
 
+## Real-sample coverage
+
+The following counts summarize the R0/R1 and release checks. A page check, a successful subtitle path, and an end-to-end ASR run are different measurements; they are not interchangeable.
+
+| Platform | Public sample checks | Verified result |
+|---|---|---|
+| YouTube | Five distinct public videos were used for subtitle, parser, or media-transfer diagnostics. | Manual subtitle retrieval succeeded on two videos and automatic subtitle retrieval on one. Two media-transfer diagnostics stopped at a platform access check; only one was the no-subtitle ASR fallback sample. |
+| Bilibili | R0 checked six public videos; R1 checked three additional public pages for metadata and subtitle tracks. | One no-subtitle audio sample completed local ASR. No usable subtitle track was found in these checks, so subtitle-success remains unverified. |
+| Xiaohongshu | Multiple URL, network, page, and HTTPS-media diagnostics were performed. | One public video completed HTTPS MP4 retrieval, audio decoding, and local ASR. |
+| Douyin | A public sample was checked and rechecked through the available anonymous access path. | A fresh-cookie challenge stopped metadata or media retrieval; no online end-to-end ASR passed. |
+
+The release regression suite contains 86 automated tests, including synthetic and offline cases. Those tests are reported separately and do not represent 86 real videos. The real-platform checks above are targeted compatibility checks, not a random or representative market sample. ASR has no CER benchmark against human-verified references.
+
 ## User-visible limitations
 
 - Subtitle availability depends on each video's subtitle tracks and the requested language.

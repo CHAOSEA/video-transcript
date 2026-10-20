@@ -1,11 +1,13 @@
-# Video Transcript Workbench
+# 视频转录 | Video Transcript
 
-**在线 CLI Beta v0.3.0 · 中文说明**<br>
+**Video Transcript Workbench · 在线 CLI Beta v0.3.0 · 中文说明**<br>
 [English](README.en.md) · [在线平台实测矩阵](docs/online-support-matrix.md)
 
-Video Transcript Workbench 是一个以在线视频链接为入口的逐字稿命令行工具。它优先获取可用字幕；在字幕不可用、平台允许访问且本机资源满足条件时，才下载媒体并使用本地 CPU 语音识别。转录结果保存为带时间轴的 Markdown 和可追溯的 `evidence.json`。
+Video Transcript 面向在线视频链接和本地媒体。在线链接优先提取可用字幕；没有匹配字幕时，如果平台允许获取媒体且设备资源满足要求，就在本机用 CPU 运行语音识别。这样也能处理部分没有可用字幕的视频，具体能否获取媒体仍取决于平台访问条件。
 
-> 这是一个有真实样本验收的 Beta，不代表所有视频或所有网络环境都能处理成功。当前只对支持矩阵中标明 PASS 的具体路径作出实测声明。
+CLI 保存带时间轴的 `transcript.md` 和记录原始分段、来源及运行参数的 `evidence.json`。在 Codex 中使用项目 Skill 时，还可以按需基于逐字稿另存分析文稿；分析是 Agent 的后续处理，不会改写原始转录，也不是 CLI 默认生成的文件。
+
+> Beta 已经过多轮真实平台样本检查和自动化回归。公开支持范围按平台与处理路径披露，不代表所有视频都能处理成功。
 
 ## 项目是什么？怎么使用？
 
@@ -15,9 +17,9 @@ Video Transcript Workbench 是一个以在线视频链接为入口的逐字稿�
 
 1. 在 Codex 中打开本仓库根目录。
 2. 按下方安装说明安装 CLI，并准备好本地 Whisper 模型。
-3. 直接提出转录需求，或显式调用 $video-transcript-workbench，例如：“用 $video-transcript-workbench 转录这个链接，中文，输出到 D:\transcripts\run-01。”
+3. 直接提出转录需求，或显式调用较短的 Skill 名 `$video-transcript`，例如：“用 `$video-transcript` 转录这个链接，中文，输出到 D:\transcripts\run-01。”
 
-Skill 位于 [.codex/skills/video-transcript-workbench/SKILL.md](.codex/skills/video-transcript-workbench/SKILL.md)。它会选择在线链接、纯字幕或本地媒体入口，核对 transcript.md 与 evidence.json；不会替用户安装依赖、下载模型或绕过平台验证。
+Skill 位于 [.codex/skills/video-transcript/SKILL.md](.codex/skills/video-transcript/SKILL.md)。它会选择在线链接、纯字幕或本地媒体入口，并检查 CLI 输出。若要求分析稿，Codex 会读取逐字稿并另存 `analysis.md`；逐字稿可能会交给当前 Codex 模型处理。分析稿和原稿分开保存。
 
 ### 也可以独立使用
 
@@ -36,26 +38,27 @@ video-transcript-link "https://www.youtube.com/watch?v=VIDEO_ID" --language zh -
 CLI 的 ASR 在本机运行。若要求云端 Agent 阅读或总结生成的逐字稿，文本可能会进入该 Agent 的模型处理流程；仅需转录时，可直接运行 CLI 并留在本机查看输出。
 ## 处理流程
 
-![处理流程：视频链接先尝试人工字幕和自动字幕，无法使用时再在平台允许的情况下本地 CPU 识别，输出逐字稿和证据文件](docs/assets/xhs-01-workflow.png)
+![处理流程：字幕优先；没有可用字幕且平台允许时本机 CPU 识别；Codex 可按需另存分析文稿](docs/assets/xhs-01-workflow.png)
 
 流程简述：
 
 1. 输入 YouTube、Bilibili、抖音或小红书视频链接，或选择本地媒体文件。
 2. 在线链接先查找匹配语言的人工字幕，再尝试自动字幕。
 3. 没有可用字幕时，只有在平台正常允许访问的情况下，才获取音轨或带音轨 MP4，并在本机运行 faster-whisper CPU/int8。
-4. 输出时间轴逐字稿 `transcript.md` 和原始分段、来源及运行参数 `evidence.json`。
+4. CLI 输出时间轴逐字稿 `transcript.md` 和原始分段、来源及运行参数 `evidence.json`。
+5. 用户提出分析需求时，Codex 可基于逐字稿另存 `analysis.md`，不覆盖转录文件。
 
 字幕内容与 ASR 原始识别文本都会保留；格式化不会覆盖原始分段。工具不调用云端转录服务，不读取浏览器 Cookie，也不绕过登录、真人验证或地区限制。
 
 ## 输出效果示意
 
-![输出效果示意：时间轴 Markdown 与 evidence.json 结构，内容为虚构示例](docs/assets/xhs-02-output-preview.png)
+![输出效果示意：transcript.md 与 evidence.json 为 CLI 输出，analysis.md 是 Codex 按需生成的独立文件；示例内容为虚构文本](docs/assets/xhs-02-output-preview.png)
 
-上图中的标题、逐字稿和 JSON 均为**虚构格式示例**，用于展示文件结构，不是实际用户视频内容，也不代表识别准确率。
+图中逐字稿、JSON 和分析稿均为**虚构格式示例**。`analysis.md` 不是 CLI 自动输出；Codex 只有在用户提出分析需求时才会生成。示例不代表识别准确率。
 
 ## 在线平台实测状态
 
-![四个平台的样本级实测状态：YouTube 字幕、Bilibili 音轨识别、小红书单样本 MP4 识别通过；抖音访问受限](docs/assets/xhs-03-platform-status.png)
+![平台实测范围：展示多轮公开视频检查、各平台成功路径和访问限制；86 项自动化回归测试另行统计](docs/assets/xhs-03-platform-status.png)
 
 | 平台与路径 | 实测状态 | 说明 |
 |---|---|---|
@@ -68,7 +71,15 @@ CLI 的 ASR 在本机运行。若要求云端 Agent 阅读或总结生成的逐�
 | 小红书字幕获取 | 未验证 | 尚无成功解析真实字幕轨道的样本。 |
 | 抖音在线转录 | 受限 | 实测遇到 fresh-cookie challenge，未完成在线端到端转录；工具不会读取或获取凭据。 |
 
-详细样本、状态定义和用户可见限制见[在线平台实测矩阵](docs/online-support-matrix.md)。**目前没有人工校订参考稿 CER 基准，因此不声称模型准确率排名或普遍准确率。**
+### 实测覆盖范围
+
+- YouTube：5 条不同公开视频用于字幕、解析或媒体传输诊断；2 条人工字幕和 1 条自动字幕路径成功。另有 2 次媒体传输诊断在平台访问检查处停止，其中只有 1 条是无字幕 ASR 回退样本。
+- Bilibili：R0 检查 6 个公开视频，R1 又检查 3 个公开页面的元信息和字幕轨；1 条无字幕音轨完成本机 ASR，尚无真实字幕成功样本。
+- 小红书：经过多轮链接、网络和 HTTPS 媒体诊断，1 条公开视频完成 MP4 到本机 ASR 的端到端流程。
+- 抖音：公开样本复核遇到 fresh-cookie challenge，未完成在线转录。
+- 86 项自动化回归测试另行统计，包含离线和合成案例，不等于 86 条真实视频。
+
+详细样本覆盖、状态定义和用户可见限制见[在线平台实测矩阵](docs/online-support-matrix.md)。公开视频检查数量、成功路径数量和自动化回归数量分别披露。**目前没有人工校订参考稿 CER 基准，因此不声称模型准确率排名或普遍准确率。**
 
 ## 命令
 
