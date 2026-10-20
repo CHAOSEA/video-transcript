@@ -61,7 +61,7 @@ def base(title, subtitle, page):
     d.ellipse((890, -160, 1210, 160), fill=MINT)
     rounded(d, (66, 58, 450, 112), 26, fill=WHITE, outline=LINE, width=2)
     d.text((88, 71), "VIDEO TRANSCRIPT", font=font(18, True), fill=INK)
-    d.text((72, 155), "OPEN-SOURCE CLI  ·  V0.3.0", font=font(18, True), fill=TEAL)
+    d.text((72, 155), "OPEN-SOURCE CLI  ·  V0.3.1", font=font(18, True), fill=TEAL)
     paragraph(d, (72, 202), title, font(54, True), INK, 910, leading=7, max_lines=2)
     paragraph(d, (74, 350), subtitle, font(23), MUTED, 900, leading=8, max_lines=2)
     d.line((72, 1380, 1008, 1380), fill=LINE, width=2)
@@ -138,10 +138,10 @@ def card_output():
 def card_status():
     im, d = base("多轮平台实测，按路径披露", "公开样本检查与自动化回归分别统计，成功结果仍按具体路径说明。", "03 / 03")
     rows = [
-        ("YouTube", "5 个公开视频做字幕和下载诊断；2 条人工字幕、1 条自动字幕路径通过。", "字幕通过", TEAL, MINT),
+        ("YouTube", "5 个公开视频检查；人工和自动字幕通过，另有 1 条无字幕视频完成本机 ASR。", "含无字幕 ASR", TEAL, MINT),
         ("Bilibili", "R0 检查 6 个视频，R1 再查 3 个页面；1 条无字幕音轨 ASR 成功，字幕未验证。", "ASR 通过", TEAL, MINT),
         ("小红书", "多轮链接、网络和 HTTPS 媒体诊断；1 条公开视频完成 MP4 → ASR。", "端到端通过", TEAL, MINT),
-        ("抖音 Douyin", "公开样本复核仍遇 fresh-cookie challenge；在线转录未通过。", "受限", "#9B5B17", PALE_ORANGE),
+        ("抖音 Douyin", "新版提取器仍在元信息前受访问限制；原因不等同于已证实要求登录。", "受限", "#9B5B17", PALE_ORANGE),
     ]
     y = 430
     for platform, detail, badge, color, pale in rows:

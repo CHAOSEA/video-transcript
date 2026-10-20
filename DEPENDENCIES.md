@@ -15,7 +15,7 @@ The project's source code is licensed under **MIT**, with copyright line `Copyri
 | Python | Validated: 3.11.9; declared: >=3.10 | Python Software Foundation License | [Official license](https://docs.python.org/3/license.html) |
 | faster-whisper | 1.2.1 | MIT | [Upstream repository](https://github.com/SYSTRAN/faster-whisper) |
 | PyAV (`av`) | 17.0.0 | BSD-3-Clause | [Upstream license](https://github.com/PyAV-Org/PyAV/blob/main/LICENSE.txt); wheels may bundle FFmpeg components. |
-| yt-dlp | 2026.7.4, with `default` extra | Unlicense | [Upstream license](https://github.com/yt-dlp/yt-dlp/blob/master/LICENSE); this project depends on the Python package and does not bundle the standalone executable. |
+| yt-dlp | 2026.8.19, with `default` extra | Unlicense | [Upstream license](https://github.com/yt-dlp/yt-dlp/blob/master/LICENSE); this project depends on the Python package and does not bundle the standalone executable. |
 | yt-dlp-ejs | 0.8.0; installed from `yt-dlp[default]` in the isolated R3 check | Unlicense, with included MIT/ISC components | See the [upstream repository](https://github.com/yt-dlp/ejs). |
 | Node.js | Node 24.22.0 LTS verified; EJS requires Node >=22 | Node.js license and bundled notices | System runtime only; not installed or packaged by this project. The R3 check used a checksum-verified temporary Node distribution; the initial validation used Node 25.9.0, which is now EOL. See [Node.js releases](https://nodejs.org/en/about/previous-releases). |
 
@@ -43,8 +43,8 @@ The real local ASR check used `Systran/faster-whisper-small`, revision `536b0662
 
 ## Platform and packaging notes
 
-- yt-dlp uses its own platform extractors and media transfer implementation. The project pins yt-dlp 2026.7.4 and tests URL and redirect host validation against that version. Re-check the network adapter whenever yt-dlp is upgraded.
-- yt-dlp 2026.7.4 includes `Douyin` and `XiaoHongShu` extractors in its upstream support list. That list does not guarantee that any given video, subtitle, CDN, or region is accessible; the tested Douyin sample again required fresh cookies when rechecked on 2026-10-19, while one Xiaohongshu sample completed the HTTPS MP4 fallback and local ASR. See `docs/online-support-matrix.md`.
+- yt-dlp uses its own platform extractors and media transfer implementation. The project pins yt-dlp 2026.8.19 and has run the full regression suite plus a real YouTube no-subtitle download and local ASR check against that version. Re-check the network adapter whenever yt-dlp is upgraded.
+- yt-dlp 2026.8.19 includes `Douyin` and `XiaoHongShu` extractors in its upstream support list. That list does not guarantee that any given video, subtitle, CDN, or region is accessible; an anonymous Douyin check remained blocked before metadata, while one Xiaohongshu sample completed the HTTPS MP4 fallback and local ASR. See `docs/online-support-matrix.md`.
 - Xiaohongshu download selection prefers audio-only formats, then a page-provided, allowlisted HTTPS `og:video` MP4. PyAV validates that the downloaded MP4 contains both audio and video. The page metadata path was exercised with one real sample; it is not a platform-wide availability guarantee.
 - The project does not package or enable remote EJS components, read login credentials, or bypass platform checks.
 - For Xiaohongshu, an `xsec_token` explicitly present in the supplied URL may be used only in-memory for the extractor request. Evidence and safe errors keep it out; no browser or account credentials are loaded.

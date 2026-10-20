@@ -305,7 +305,7 @@ def _safe_ytdlp_factory(platform: str, options: dict[str, Any]):
 def _harden_ytdlp_request_handlers(client: Any, allowed_hosts: tuple[str, ...]) -> None:
     """Install redirect-aware HTTPS host checks in yt-dlp's pinned transports.
 
-    yt-dlp 2026.7.4 exposes extraction and subtitle APIs publicly, but its transport
+    yt-dlp 2026.8.19 exposes extraction and subtitle APIs publicly, but its transport
     director does not expose a redirect-policy hook. The project pins this dependency
     and replaces its request handlers so each HTTP redirect is checked before the next
     request is sent. Unknown optional handlers fail closed.

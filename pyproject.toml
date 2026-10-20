@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "video-transcript-workbench"
-version = "0.3.0"
-description = "Subtitle-first online video transcription with local CPU ASR fallback."
+version = "0.3.1"
+description = "Video transcription with subtitle retrieval and local CPU ASR when captions are unavailable."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 license-files = ["LICENSE"]
-dependencies = ["faster-whisper==1.2.1", "av==17.0.0", "yt-dlp[default]==2026.7.4"]
+dependencies = ["faster-whisper==1.2.1", "av==17.0.0", "yt-dlp[default]==2026.8.19"]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Environment :: Console",

@@ -408,6 +408,14 @@ class DownloadAdapterTests(unittest.TestCase):
                             "acodec": "aac",
                             "vcodec": "h264",
                             "duration": 1.0,
+                        }, {
+                            "format_id": "https-video-only",
+                            "url": "https://sns-video-bd.xhscdn.com/video-only.mp4",
+                            "ext": "mp4",
+                            "protocol": "https",
+                            "acodec": "none",
+                            "vcodec": "h264",
+                            "duration": 1.0,
                         }],
                     }
 
@@ -499,6 +507,8 @@ class DownloadAdapterTests(unittest.TestCase):
                         "url": "https://sns-video-bd.xhscdn.com/video.mp4?sign=private",
                         "ext": "mp4",
                         "protocol": "https",
+                        "acodec": "aac",
+                        "vcodec": "h264",
                         "duration": 1.0,
                     }],
                 }
@@ -542,6 +552,8 @@ class DownloadAdapterTests(unittest.TestCase):
                         "url": "https://sns-video-bd.xhscdn.com/video.mp4?sign=private",
                         "ext": "mp4",
                         "protocol": "https",
+                        "acodec": "aac",
+                        "vcodec": "h264",
                         "duration": 1.0,
                     }],
                 }

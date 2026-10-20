@@ -1,11 +1,11 @@
 # 视频转录 | Video Transcript
 
-**Video Transcript Workbench · 在线 CLI Beta v0.3.0 · 中文说明**<br>
+**Video Transcript · 在线 CLI Beta v0.3.1 · 中文说明**<br>
 [English](README.en.md) · [在线平台实测矩阵](docs/online-support-matrix.md)
 
-Video Transcript 面向在线视频链接和本地媒体。在线链接优先提取可用字幕；没有匹配字幕时，如果平台允许获取媒体且设备资源满足要求，就在本机用 CPU 运行语音识别。这样也能处理部分没有可用字幕的视频，具体能否获取媒体仍取决于平台访问条件。
+Video Transcript 把已支持平台的视频链接或本地音视频，变成带时间轴的逐字稿。没有可用字幕时，只要平台允许获取媒体，工具就会在本机识别语音；在 Codex 中还可以按需基于逐字稿生成单独的分析稿。
 
-CLI 保存带时间轴的 `transcript.md` 和记录原始分段、来源及运行参数的 `evidence.json`。在 Codex 中使用项目 Skill 时，还可以按需基于逐字稿另存分析文稿；分析是 Agent 的后续处理，不会改写原始转录，也不是 CLI 默认生成的文件。
+命令行会生成 `transcript.md` 和 `evidence.json`，后者记录原始分段、来源和运行参数。分析稿由 Codex 项目 Skill 按你的要求另存为 `analysis.md`，不覆盖逐字稿；单独使用命令行时不会生成分析稿。
 
 > Beta 已经过多轮真实平台样本检查和自动化回归。公开支持范围按平台与处理路径披露，不代表所有视频都能处理成功。
 
@@ -64,19 +64,19 @@ CLI 的 ASR 在本机运行。若要求云端 Agent 阅读或总结生成的逐�
 |---|---|---|
 | YouTube 人工字幕 | PASS | 已真实获取字幕；特定字幕格式失败时验证过备用字幕格式。 |
 | YouTube 自动字幕 | PASS | 已真实获取自动字幕，证据中保留其自动生成属性。 |
-| YouTube 无字幕音频回退 | 受限 | 测试环境遇到平台访问验证，程序不会绕过。 |
+| YouTube 无字幕音频 → 本地 ASR | PASS（单样本） | 一条无可用字幕的视频完成音轨下载和 CPU/int8 转录；另有一次媒体请求仍遇访问检查。 |
 | Bilibili 无字幕音轨 → 本地 ASR | PASS | 已完成真实音轨下载和 CPU 转录。 |
 | Bilibili 字幕获取 | 未验证 | 尚无真实字幕成功样本。 |
 | 小红书 HTTPS MP4 → 本地 ASR | PASS（单样本） | 一条公开视频完成真实下载与本地转录；不代表其他视频都能访问。 |
 | 小红书字幕获取 | 未验证 | 尚无成功解析真实字幕轨道的样本。 |
-| 抖音在线转录 | 受限 | 实测遇到 fresh-cookie challenge，未完成在线端到端转录；工具不会读取或获取凭据。 |
+| 抖音在线转录 | 受限 | 当前提取器在取得视频信息前遇到访问限制，尚未完成在线端到端转录；工具不会读取或获取凭据。 |
 
 ### 实测覆盖范围
 
-- YouTube：5 条不同公开视频用于字幕、解析或媒体传输诊断；2 条人工字幕和 1 条自动字幕路径成功。另有 2 次媒体传输诊断在平台访问检查处停止，其中只有 1 条是无字幕 ASR 回退样本。
+- YouTube：5 条不同公开视频用于字幕、解析或媒体传输诊断；2 条人工字幕和 1 条自动字幕路径成功；另有一条无可用字幕的视频用 yt-dlp 2026.8.19 完成本地 ASR。另一次媒体传输诊断仍在平台访问检查处停止。
 - Bilibili：R0 检查 6 个公开视频，R1 又检查 3 个公开页面的元信息和字幕轨；1 条无字幕音轨完成本机 ASR，尚无真实字幕成功样本。
 - 小红书：经过多轮链接、网络和 HTTPS 媒体诊断，1 条公开视频完成 MP4 到本机 ASR 的端到端流程。
-- 抖音：公开样本复核遇到 fresh-cookie challenge，未完成在线转录。
+- 抖音：使用 yt-dlp 2026.8.19、未提供凭据的公开样本复核仍在取得视频信息前受限；这还不能证明原因一定是登录要求。
 - 86 项自动化回归测试另行统计，包含离线和合成案例，不等于 86 条真实视频。
 
 详细样本覆盖、状态定义和用户可见限制见[在线平台实测矩阵](docs/online-support-matrix.md)。公开视频检查数量、成功路径数量和自动化回归数量分别披露。**目前没有人工校订参考稿 CER 基准，因此不声称模型准确率排名或普遍准确率。**
@@ -94,8 +94,8 @@ CLI 的 ASR 在本机运行。若要求云端 Agent 阅读或总结生成的逐�
 已验证环境为 Windows 10/11、Python 3.11。项目声明 Python 3.10+，其他版本和操作系统尚未完成验证。
 
 ~~~powershell
-git clone https://github.com/CHAOSEA/video-transcript-workbench.git
-cd video-transcript-workbench
+git clone https://github.com/CHAOSEA/video-transcript.git
+cd video-transcript
 py -3.11 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
 .\.venv\Scripts\python.exe -m pip install .

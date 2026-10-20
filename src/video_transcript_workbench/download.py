@@ -180,9 +180,24 @@ def _xhs_https_og_video_url(
 
 
 def _has_safe_https_media_format(info: dict[str, Any], platform: str) -> bool:
+    """Return whether a safe HTTPS format can pass the download selector."""
     allowed_hosts = _allowed_hosts(platform)
     for item in info.get("formats") or []:
         if not isinstance(item, dict) or not isinstance(item.get("url"), str):
+            continue
+        if str(item.get("protocol") or "").casefold() not in ALLOWED_DOWNLOAD_PROTOCOLS:
+            continue
+        audio_codec = str(item.get("acodec") or "").casefold()
+        if not audio_codec or audio_codec == "none":
+            continue
+        extension = str(item.get("ext") or "").casefold()
+        is_supported_audio = extension in ALLOWED_AUDIO_EXTENSIONS
+        if platform == "xiaohongshu":
+            video_codec = str(item.get("vcodec") or "").casefold()
+            is_supported_muxed_mp4 = extension == "mp4" and video_codec not in {"", "none"}
+            if not (is_supported_audio or is_supported_muxed_mp4):
+                continue
+        elif not is_supported_audio:
             continue
         try:
             parsed = urlsplit(item["url"])
