@@ -9,20 +9,31 @@ Video Transcript Workbench is a command-line tool for turning online video links
 
 ## What is this, and how do I use it?
 
-This is a standalone Python command-line tool (CLI), not an Agent Skill. You do not need an AI agent to transcribe media; subtitle selection, media retrieval, and local ASR are performed by the CLI.
+The core product is a standalone Python command-line tool (CLI). This repository also includes a Codex project Skill that helps an agent invoke the CLI and check the outputs. Subtitle retrieval, media processing, and ASR are always performed by the CLI.
 
-**Use it directly:** after installing the project and a local Whisper model, run this in PowerShell:
+### Recommended: Codex + the project Skill
+
+1. Open the repository root in Codex.
+2. Install the CLI using the instructions below and make a local Whisper model available.
+3. Ask for a transcript directly, or invoke $video-transcript-workbench explicitly. For example: “Use $video-transcript-workbench to transcribe this link in Chinese and save it under D:\transcripts\run-01.”
+
+The Skill is at [.codex/skills/video-transcript-workbench/SKILL.md](.codex/skills/video-transcript-workbench/SKILL.md). It chooses the online-link, subtitles-only, or local-media entry point and checks transcript.md and evidence.json. It does not install dependencies, download model weights, or bypass platform checks.
+
+### Use the CLI on its own
+
+Codex, WorkBuddy, and cloud AI services are optional. After installing the project and activating .venv, run this in PowerShell:
 
 ~~~powershell
 video-transcript-link "https://www.youtube.com/watch?v=VIDEO_ID" --language zh --model small --output-dir "D:\transcripts\run-01"
 ~~~
 
-Then open transcript.md and evidence.json in the output directory. See the [online support matrix](docs/online-support-matrix.md) for sample-scoped platform results.
+Use video-transcript for local media and video-transcript-online for subtitles only.
 
-**Use it with Codex or WorkBuddy:** an agent can assemble arguments, run the CLI, and inspect outputs if it runs on the same machine and can access the installed Python environment, media files, and model cache. Codex uses the selected local project folder as its working context. WorkBuddy and other agents likewise need local command execution and file access. A cloud agent or a different machine does not automatically have access to files, proxies, or models on this computer.
+### WorkBuddy and other agents
 
-This repository does not currently include an installable Agent Skill. A future Skill could provide instructions and parameter templates while this CLI remains the transcription engine. If you ask a cloud agent to read or summarize a transcript, that text may be processed by that agent's model. Run the CLI directly when you want transcription to stay on your machine.
+Other agents can call the CLI if they can access a local terminal and files, but this repository does not include a dedicated WorkBuddy Skill or plugin. A cloud agent or a different machine cannot directly use media, Python environments, or model caches on this computer.
 
+ASR runs locally. If you ask a cloud agent to read or summarize the transcript, the text may be processed by that agent's model service. For transcription only, you can run the CLI directly and keep the output local.
 ## Workflow
 
 ![Workflow: try manual and automatic subtitles first, then local CPU ASR when platform access permits, and save transcript and evidence files](docs/assets/xhs-01-workflow.png)
@@ -76,9 +87,12 @@ py -3.11 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
 .\.venv\Scripts\python.exe -m pip install .
 .\.venv\Scripts\python.exe -m pip check
+.\.venv\Scripts\Activate.ps1
 ~~~
 
 Node.js is needed by yt-dlp for YouTube JavaScript challenge support. Node 24.22.0 LTS with yt-dlp-ejs 0.8.0 passed isolated checks; EJS requires Node.js 22 or newer. This project does not install Node.js.
+
+If PowerShell blocks the activation script, call .\.venv\Scripts\video-transcript-link.exe and the corresponding entry points directly.
 
 Whisper weights must be obtained separately. This project does not silently download model files or switch models. The tested model was `Systran/faster-whisper-small`. If it is not cached locally, you can explicitly download it with a Hugging Face Hub tool, for example:
 

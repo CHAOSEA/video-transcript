@@ -9,20 +9,31 @@ Video Transcript Workbench 是一个以在线视频链接为入口的逐字稿�
 
 ## 项目是什么？怎么使用？
 
-这是一个可以独立运行的 Python 命令行工具（CLI），不是 Agent Skill，也不要求先安装或打开 AI Agent。字幕选择、媒体获取和本地 ASR 都由 CLI 执行。
+核心产品是独立运行的 Python 命令行工具（CLI）；本仓库同时提供 Codex 项目级 Skill，帮助 Agent 调用 CLI 并检查结果。字幕获取、媒体处理和 ASR 始终由 CLI 执行。
 
-**独立使用**：安装项目和本地 Whisper 模型后，在 PowerShell 运行命令：
+### 推荐方式：Codex + 项目 Skill
+
+1. 在 Codex 中打开本仓库根目录。
+2. 按下方安装说明安装 CLI，并准备好本地 Whisper 模型。
+3. 直接提出转录需求，或显式调用 $video-transcript-workbench，例如：“用 $video-transcript-workbench 转录这个链接，中文，输出到 D:\transcripts\run-01。”
+
+Skill 位于 [.codex/skills/video-transcript-workbench/SKILL.md](.codex/skills/video-transcript-workbench/SKILL.md)。它会选择在线链接、纯字幕或本地媒体入口，核对 transcript.md 与 evidence.json；不会替用户安装依赖、下载模型或绕过平台验证。
+
+### 也可以独立使用
+
+不需要 Codex、WorkBuddy 或云端 AI 服务。安装并激活项目环境后，在 PowerShell 运行：
 
 ~~~powershell
 video-transcript-link "https://www.youtube.com/watch?v=VIDEO_ID" --language zh --model small --output-dir "D:\transcripts\run-01"
 ~~~
 
-转录完成后查看输出目录中的 transcript.md 和 evidence.json。平台实测范围见[在线平台实测矩阵](docs/online-support-matrix.md)。
+本地文件使用 video-transcript；只获取在线字幕时使用 video-transcript-online。
 
-**搭配 Codex 或 WorkBuddy**：如果 Agent 运行在本机，并且它能访问安装了本项目的 Python 环境、媒体文件和模型缓存，就可以让它代为组织参数、运行 CLI 并检查结果。Codex 的本地项目以你选定的目录为工作上下文；WorkBuddy 等工具也需要满足本机命令执行和文件访问条件。若 Agent 运行在云端或另一台机器，它不会自动拥有这台电脑上的文件、代理或模型。
+### WorkBuddy 和其他 Agent
 
-当前仓库没有提供可安装的 Agent Skill。以后可以另做一个 Skill 作为调用说明和参数模板，底层仍由这个 CLI 完成转录。为了保护内容隐私，如果让云端 Agent 阅读或总结逐字稿，文本可能会进入该 Agent 的模型处理流程；只想本机转录时，直接运行 CLI 即可。
+其他能在本机访问终端和文件的 Agent 也可以调用 CLI，但当前仓库没有专用的 WorkBuddy Skill 或插件。若 Agent 在云端或另一台机器运行，它无法直接使用本机媒体、Python 环境或模型缓存。
 
+CLI 的 ASR 在本机运行。若要求云端 Agent 阅读或总结生成的逐字稿，文本可能会进入该 Agent 的模型处理流程；仅需转录时，可直接运行 CLI 并留在本机查看输出。
 ## 处理流程
 
 ![处理流程：视频链接先尝试人工字幕和自动字幕，无法使用时再在平台允许的情况下本地 CPU 识别，输出逐字稿和证据文件](docs/assets/xhs-01-workflow.png)
@@ -78,9 +89,12 @@ py -3.11 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
 .\.venv\Scripts\python.exe -m pip install .
 .\.venv\Scripts\python.exe -m pip check
+.\.venv\Scripts\Activate.ps1
 ~~~
 
 在线 YouTube JavaScript challenge 支持需要 Node.js。Node 24.22.0 LTS 与 yt-dlp-ejs 0.8.0 已完成隔离环境检查；EJS 要求 Node.js 22 或更新版本。Node.js 不由本项目安装。
+
+如果 PowerShell 不允许运行激活脚本，可直接调用 .\.venv\Scripts\video-transcript-link.exe 等入口。
 
 Whisper 模型权重需要单独取得，本项目不会静默下载或自动切换模型。已验收的模型为 `Systran/faster-whisper-small`。如果本机尚无该模型，可在明确选择后使用 Hugging Face Hub 工具下载，例如：
 

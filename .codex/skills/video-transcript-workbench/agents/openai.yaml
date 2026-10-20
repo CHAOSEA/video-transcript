@@ -1,0 +1,7 @@
+interface:
+  display_name: "Video Transcript Workbench"
+  short_description: "Transcribe links and local media with this CLI"
+  default_prompt: "Use $video-transcript-workbench to transcribe this video link or local media file."
+
+policy:
+  allow_implicit_invocation: true
