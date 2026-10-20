@@ -1,11 +1,27 @@
 # Video Transcript Workbench
 
 **Online CLI Beta v0.3.0**<br>
-[简体中文](README.md) · [Online platform verification matrix](docs/online-support-matrix.md) · [Xiaohongshu post assets](docs/xiaohongshu/图文发布素材.md)
+[简体中文](README.md) · [Online platform verification matrix](docs/online-support-matrix.md)
 
 Video Transcript Workbench is a command-line tool for turning online video links and local media into traceable transcripts. It prefers available subtitles, then uses local CPU speech recognition when subtitles are unavailable and platform access allows media retrieval. Outputs include timestamped Markdown and `evidence.json`.
 
 > This is a sample-verified Beta. It does not guarantee that every video or network environment will work. Claims are limited to the specific paths marked PASS in the support matrix.
+
+## What is this, and how do I use it?
+
+This is a standalone Python command-line tool (CLI), not an Agent Skill. You do not need an AI agent to transcribe media; subtitle selection, media retrieval, and local ASR are performed by the CLI.
+
+**Use it directly:** after installing the project and a local Whisper model, run this in PowerShell:
+
+~~~powershell
+video-transcript-link "https://www.youtube.com/watch?v=VIDEO_ID" --language zh --model small --output-dir "D:\transcripts\run-01"
+~~~
+
+Then open transcript.md and evidence.json in the output directory. See the [online support matrix](docs/online-support-matrix.md) for sample-scoped platform results.
+
+**Use it with Codex or WorkBuddy:** an agent can assemble arguments, run the CLI, and inspect outputs if it runs on the same machine and can access the installed Python environment, media files, and model cache. Codex uses the selected local project folder as its working context. WorkBuddy and other agents likewise need local command execution and file access. A cloud agent or a different machine does not automatically have access to files, proxies, or models on this computer.
+
+This repository does not currently include an installable Agent Skill. A future Skill could provide instructions and parameter templates while this CLI remains the transcription engine. If you ask a cloud agent to read or summarize a transcript, that text may be processed by that agent's model. Run the CLI directly when you want transcription to stay on your machine.
 
 ## Workflow
 
@@ -128,12 +144,6 @@ python -m unittest discover -s tests -v
 ~~~
 
 See [dependency and rights record](DEPENDENCIES.md) for the Node.js 24 LTS / yt-dlp-ejs check, clean dependency installation, and package validation.
-
-## Xiaohongshu post assets
-
-The project includes three portrait images, an editable image-generation script, and Chinese post copy for later Xiaohongshu Skill or image-text post use: [open the post materials](docs/xiaohongshu/图文发布素材.md).
-
-The transcript preview uses fictional content. Platform claims are limited to tested samples and do not mean all four platforms are fully supported.
 
 ## License
 

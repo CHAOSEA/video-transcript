@@ -1,11 +1,27 @@
 # Video Transcript Workbench
 
 **在线 CLI Beta v0.3.0 · 中文说明**<br>
-[English](README.en.md) · [在线平台实测矩阵](docs/online-support-matrix.md) · [小红书图文素材](docs/xiaohongshu/图文发布素材.md)
+[English](README.en.md) · [在线平台实测矩阵](docs/online-support-matrix.md)
 
 Video Transcript Workbench 是一个以在线视频链接为入口的逐字稿命令行工具。它优先获取可用字幕；在字幕不可用、平台允许访问且本机资源满足条件时，才下载媒体并使用本地 CPU 语音识别。转录结果保存为带时间轴的 Markdown 和可追溯的 `evidence.json`。
 
 > 这是一个有真实样本验收的 Beta，不代表所有视频或所有网络环境都能处理成功。当前只对支持矩阵中标明 PASS 的具体路径作出实测声明。
+
+## 项目是什么？怎么使用？
+
+这是一个可以独立运行的 Python 命令行工具（CLI），不是 Agent Skill，也不要求先安装或打开 AI Agent。字幕选择、媒体获取和本地 ASR 都由 CLI 执行。
+
+**独立使用**：安装项目和本地 Whisper 模型后，在 PowerShell 运行命令：
+
+~~~powershell
+video-transcript-link "https://www.youtube.com/watch?v=VIDEO_ID" --language zh --model small --output-dir "D:\transcripts\run-01"
+~~~
+
+转录完成后查看输出目录中的 transcript.md 和 evidence.json。平台实测范围见[在线平台实测矩阵](docs/online-support-matrix.md)。
+
+**搭配 Codex 或 WorkBuddy**：如果 Agent 运行在本机，并且它能访问安装了本项目的 Python 环境、媒体文件和模型缓存，就可以让它代为组织参数、运行 CLI 并检查结果。Codex 的本地项目以你选定的目录为工作上下文；WorkBuddy 等工具也需要满足本机命令执行和文件访问条件。若 Agent 运行在云端或另一台机器，它不会自动拥有这台电脑上的文件、代理或模型。
+
+当前仓库没有提供可安装的 Agent Skill。以后可以另做一个 Skill 作为调用说明和参数模板，底层仍由这个 CLI 完成转录。为了保护内容隐私，如果让云端 Agent 阅读或总结逐字稿，文本可能会进入该 Agent 的模型处理流程；只想本机转录时，直接运行 CLI 即可。
 
 ## 处理流程
 
@@ -130,12 +146,6 @@ python -m unittest discover -s tests -v
 ~~~
 
 Node.js 24 LTS / yt-dlp-ejs、完整依赖安装和发行包检查记录见[依赖与权利记录](DEPENDENCIES.md)。
-
-## 小红书图文素材
-
-项目包含后续制作小红书 Skill 或图文帖可复用的三张竖版图片、可编辑生成脚本和中文发布文案：[打开图文发布素材](docs/xiaohongshu/图文发布素材.md)。
-
-素材中的展示稿为虚构示意；平台状态严格限定为项目已验证的样本，不代表四个平台全面支持。
 
 ## 许可证
 
