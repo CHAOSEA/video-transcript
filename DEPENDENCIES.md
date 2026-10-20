@@ -1,10 +1,10 @@
 # Dependency, provenance, and license record
 
-Updated: 2026-10-19
+Updated: 2026-10-20
 
 ## Project source
 
-This candidate contains the new implementation of local media transcription, public-video URL validation, subtitle retrieval, subtitle-first fallback workflow, and evidence generation. No v9, V10.4, or legacy modular source files are included.
+This release contains the new implementation of local media transcription, public-video URL validation, subtitle retrieval, subtitle-first fallback workflow, and evidence generation. No v9, V10.4, or legacy modular source files are included.
 
 The project's source code is licensed under **MIT**, with copyright line `Copyright (c) 2026 CHAOS`. The root `LICENSE` contains the full SPDX MIT text; `pyproject.toml` declares `license = "MIT"` and includes `LICENSE` in license files. This project license does not change third-party dependency, model, or processed-media rights.
 
@@ -36,7 +36,7 @@ These are environment observations, not direct constraints in `pyproject.toml`. 
 
 ## Model files
 
-The real local ASR check used `Systran/faster-whisper-small`, revision `536b0662742c02347bc0e980a01041f333bce120`, whose model card identifies MIT licensing. The repository describes it as a CTranslate2-format conversion of OpenAI Whisper Small. Model weights are not included in this candidate, are not installed with the Python package, and are not downloaded by the transcription commands. Users must obtain model files separately and comply with the model's license and terms.
+The real local ASR check used `Systran/faster-whisper-small`, revision `536b0662742c02347bc0e980a01041f333bce120`, whose model card identifies MIT licensing. The repository describes it as a CTranslate2-format conversion of OpenAI Whisper Small. Model weights are not included in this release, are not installed with the Python package, and are not downloaded by the transcription commands. Users must obtain model files separately and comply with the model's license and terms.
 
 - [Model card](https://huggingface.co/Systran/faster-whisper-small)
 - [faster-whisper upstream](https://github.com/SYSTRAN/faster-whisper)

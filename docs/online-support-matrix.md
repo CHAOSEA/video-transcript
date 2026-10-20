@@ -1,6 +1,6 @@
 # Online support matrix
 
-Updated: 2026-10-19. This is a public, sample-scoped compatibility summary. PASS means that the named type of path worked on at least one tested public video; it is not a guarantee for all videos, regions, or networks.
+Updated: 2026-10-20. This is a public, sample-scoped compatibility summary. PASS means that the named type of path worked on at least one tested public video; it is not a guarantee for all videos, regions, or networks.
 
 | Platform/path | Status | Evidence summary |
 |---|---|---|
