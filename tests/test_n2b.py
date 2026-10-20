@@ -29,6 +29,7 @@ from video_transcript_workbench.download import (
     _xhs_https_og_video_url,
     download_audio_to_directory,
     javascript_runtime_options,
+    validate_download_limits,
 )
 from video_transcript_workbench.models import RunConfig
 from video_transcript_workbench.online import UnsafeNetworkTarget
@@ -760,6 +761,18 @@ class DownloadAdapterTests(unittest.TestCase):
                 max_duration_seconds=MAX_ALLOWED_DURATION_SECONDS + 1,
             )
 
+    def test_limit_configuration_requires_positive_integers(self) -> None:
+        invalid_limits = (
+            (True, DEFAULT_MAX_DOWNLOAD_BYTES),
+            (60.5, DEFAULT_MAX_DOWNLOAD_BYTES),
+            (DEFAULT_MAX_DURATION_SECONDS, False),
+            (DEFAULT_MAX_DURATION_SECONDS, 1024.5),
+        )
+        for duration, size in invalid_limits:
+            with self.subTest(duration=duration, size=size):
+                with self.assertRaises(ValueError):
+                    validate_download_limits(duration, size)
+
 
 class WorkflowTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -776,6 +789,38 @@ class WorkflowTests(unittest.TestCase):
             **kwargs,
         )
         return result, client
+
+    def test_invalid_run_id_and_language_are_rejected_before_network_access(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            for index, invalid_run_id in enumerate(("", 0, [])):
+                with self.subTest(run_id=invalid_run_id):
+                    output = Path(temp) / str(index)
+                    with self.assertRaises(ValueError):
+                        run_link_transcription(
+                            VIDEO_URL,
+                            language="zh",
+                            config=self.config,
+                            output_dir=output,
+                            run_id=invalid_run_id,
+                            subtitle_client_factory=lambda *_args: self.fail(
+                                "invalid run_id must be rejected before network access"
+                            ),
+                        )
+                    self.assertFalse(output.exists())
+            for index, invalid_language in enumerate((None, [], {}), start=10):
+                with self.subTest(language=invalid_language):
+                    output = Path(temp) / str(index)
+                    with self.assertRaises(ValueError):
+                        run_link_transcription(
+                            VIDEO_URL,
+                            language=invalid_language,
+                            config=self.config,
+                            output_dir=output,
+                            subtitle_client_factory=lambda *_args: self.fail(
+                                "invalid language must be rejected before network access"
+                            ),
+                        )
+                    self.assertFalse(output.exists())
 
     def test_subtitle_success_writes_once_and_never_downloads_or_runs_asr(self) -> None:
         info = video_info(subtitles={"zh": [{"ext": "vtt", "url": "https://www.youtube.com/sub.vtt"}]})

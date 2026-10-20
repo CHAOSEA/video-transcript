@@ -355,17 +355,30 @@ class OnlineRetrievalTests(unittest.TestCase):
         self.assertEqual(evidence["status"], "unsupported_url")
         self.assertNotIn("token=secret", stdout.getvalue() + stderr.getvalue())
 
-    def test_run_id_cannot_escape_output_directory(self) -> None:
+    def test_invalid_run_id_and_language_are_rejected_before_network(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
-            output = Path(temp) / "run"
-            with self.assertRaises(ValueError):
-                retrieve_subtitle_to_artifacts(
-                    "https://youtube.com/watch?v=BaW_jenozKc",
-                    language="en",
-                    output_dir=output,
-                    run_id="../outside",
-                )
-            self.assertFalse(output.exists())
+            for index, invalid_run_id in enumerate(("../outside", "", 0, [])):
+                with self.subTest(run_id=invalid_run_id):
+                    output = Path(temp) / str(index)
+                    with self.assertRaises(ValueError):
+                        retrieve_subtitle_to_artifacts(
+                            "https://youtube.com/watch?v=BaW_jenozKc",
+                            language="en",
+                            output_dir=output,
+                            run_id=invalid_run_id,
+                        )
+                    self.assertFalse(output.exists())
+            for index, invalid_language in enumerate((None, [], {}), start=10):
+                with self.subTest(language=invalid_language):
+                    output = Path(temp) / str(index)
+                    with self.assertRaises(ValueError):
+                        retrieve_subtitle_to_artifacts(
+                            "https://youtube.com/watch?v=BaW_jenozKc",
+                            language=invalid_language,
+                            output_dir=output,
+                            run_id="valid-run-id",
+                        )
+                    self.assertFalse(output.exists())
 
     def test_unsupported_url_writes_only_a_classified_failure_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

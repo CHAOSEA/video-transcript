@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from math import isfinite
 
 # This program never downloads models or contacts remote inference services.
 os.environ["HF_HUB_OFFLINE"] = "1"
@@ -319,7 +320,16 @@ def transcribe_to_artifacts(
         evidence.finished_at_utc = _utc_now()
         evidence.language_detected = getattr(info, "language", None)
         probability = getattr(info, "language_probability", None)
-        evidence.language_probability = float(probability) if probability is not None else None
+        try:
+            normalized_probability = float(probability) if probability is not None else None
+        except (TypeError, ValueError, OverflowError):
+            normalized_probability = None
+        if normalized_probability is not None and (
+            not isfinite(normalized_probability)
+            or not 0.0 <= normalized_probability <= 1.0
+        ):
+            normalized_probability = None
+        evidence.language_probability = normalized_probability
         evidence.segments = raw_segments
         evidence.timing = {
             "media_decode_seconds": round(media_decode_seconds, 3),

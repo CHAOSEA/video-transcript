@@ -56,7 +56,7 @@ The transcript, JSON, and analysis text shown above are **fictional format examp
 
 ## Online platform status
 
-![Platform verification scope: multiple public-video checks, successful paths, and access limits; 98 automated regression tests are counted separately](docs/assets/xhs-03-platform-status.png)
+![Platform verification scope: multiple public-video checks, successful paths, and access limits; 104 automated regression tests are counted separately](docs/assets/xhs-03-platform-status.png)
 
 | Platform and path | Status | Verification |
 |---|---|---|
@@ -75,7 +75,7 @@ The transcript, JSON, and analysis text shown above are **fictional format examp
 - Bilibili: R0 checked six public videos, and R1 checked three additional public pages for metadata and subtitle tracks. One no-subtitle audio sample completed local ASR; no real subtitle-success sample is available.
 - Xiaohongshu: multiple URL, network, and HTTPS-media diagnostics were run; one public video completed the MP4-to-local-ASR path.
 - Douyin: a public sample was rechecked without credentials using yt-dlp 2026.8.19 and remained access-restricted before metadata; online transcription did not complete.
-- The current 98 automated regression tests are counted separately. They include offline and synthetic cases and do not represent 98 real videos. The 86-test v0.3.0 acceptance is historical.
+- The current 104 automated regression tests are counted separately. They include offline and synthetic cases and do not represent 104 real videos. The 86-test v0.3.0 acceptance is historical.
 
 See the [online support matrix](docs/online-support-matrix.md) for sample coverage and user-visible limitations. Public-video checks, successful paths, and automated regression tests are reported separately. **There is no CER benchmark against human-verified references, so this project makes no model-ranking or universal accuracy claim.**
 

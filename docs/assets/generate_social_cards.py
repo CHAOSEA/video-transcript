@@ -153,8 +153,8 @@ def card_status():
         paragraph(d, (106, y + 88), detail, font(20), MUTED, 850, leading=5, max_lines=2)
         y += 177
     rounded(d, (72, 1150, 1008, 1312), 25, fill=DARK)
-    d.text((104, 1178), "98 项自动化回归测试", font=font(26, True), fill=WHITE)
-    paragraph(d, (106, 1226), "测试含合成案例，不等于 98 条真实视频。ASR 也尚无人工校订 CER 基准。", font(18), "#D8E9E4", 850, leading=4, max_lines=3)
+    d.text((104, 1178), "104 项自动化回归测试", font=font(26, True), fill=WHITE)
+    paragraph(d, (106, 1226), "测试含合成案例，不等于 104 条真实视频。ASR 也尚无人工校订 CER 基准。", font(18), "#D8E9E4", 850, leading=4, max_lines=3)
     return im
 
 

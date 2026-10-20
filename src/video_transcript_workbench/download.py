@@ -78,6 +78,16 @@ class DownloadedMedia:
 
 
 def validate_download_limits(max_duration_seconds: int, max_download_bytes: int) -> None:
+    if (
+        isinstance(max_duration_seconds, bool)
+        or not isinstance(max_duration_seconds, int)
+    ):
+        raise ValueError("max_duration_seconds must be an integer")
+    if (
+        isinstance(max_download_bytes, bool)
+        or not isinstance(max_download_bytes, int)
+    ):
+        raise ValueError("max_download_bytes must be an integer")
     if not 1 <= max_duration_seconds <= MAX_ALLOWED_DURATION_SECONDS:
         raise ValueError(
             f"max_duration_seconds must be between 1 and {MAX_ALLOWED_DURATION_SECONDS}"

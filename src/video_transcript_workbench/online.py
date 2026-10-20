@@ -818,10 +818,10 @@ def retrieve_subtitle_attempt(
     run_id: str | None = None,
 ) -> dict[str, Any]:
     """Fetch and classify a subtitle attempt without writing final artifacts."""
-    if language not in SUPPORTED_LANGUAGES:
+    if not isinstance(language, str) or language not in SUPPORTED_LANGUAGES:
         raise ValueError("language must be one of: zh, en, ja")
-    run_id = run_id or uuid.uuid4().hex
-    if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", run_id):
+    run_id = uuid.uuid4().hex if run_id is None else run_id
+    if not isinstance(run_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", run_id):
         raise ValueError("run_id must contain only letters, numbers, underscores, or hyphens")
     started_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     reference: VideoReference | None = None

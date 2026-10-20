@@ -26,7 +26,7 @@ The following counts summarize the R0/R1 and release checks. A page check, a suc
 | Xiaohongshu | Multiple URL, network, page, and HTTPS-media diagnostics were performed. | One public video completed HTTPS MP4 retrieval, audio decoding, and local ASR. |
 | Douyin | A public sample was checked and rechecked through the available anonymous access path using yt-dlp 2026.8.19. | An access/auth-restricted error stopped metadata retrieval; the extractor's fresh-cookie wording does not establish that login is the cause. No online end-to-end ASR passed. |
 
-The current regression suite contains 98 automated tests, including synthetic and offline cases; the v0.3.0 release acceptance historically ran 86. These tests are reported separately and do not represent real-video sample counts. The real-platform checks above are targeted compatibility checks, not a random or representative market sample. ASR has no CER benchmark against human-verified references.
+The current regression suite contains 104 automated tests, including synthetic and offline cases; the v0.3.0 release acceptance historically ran 86. These tests are reported separately and do not represent real-video sample counts. The real-platform checks above are targeted compatibility checks, not a random or representative market sample. ASR has no CER benchmark against human-verified references.
 
 ## User-visible limitations
 
@@ -39,3 +39,8 @@ The current regression suite contains 98 automated tests, including synthetic an
 - A successful public sample does not guarantee another video's availability or transcription quality.
 
 The evidence files distinguish manual from automatic captions and keep raw source segments for traceability. They do not store original query-bearing URLs or signed subtitle/media URLs.
+
+## Upstream diagnostics checked on 2026-10-20
+
+- The [latest yt-dlp stable release](https://github.com/yt-dlp/yt-dlp/releases/latest) was 2026.08.19. Upstream reports include intermittent YouTube HTTP 403 cases even on recent builds; a 403 is not enough evidence to identify a project-side extractor bug or a login requirement ([issue #17647](https://github.com/yt-dlp/yt-dlp/issues/17647)).
+- The proposed [Douyin 403 fix, PR #17826](https://github.com/yt-dlp/yt-dlp/pull/17826), was still open when checked and describes generating request signature and cookie state. This project does not implement unmerged signature-generation work or bypass platform access checks; it keeps the local-media transcription path available instead.

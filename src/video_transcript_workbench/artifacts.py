@@ -284,7 +284,7 @@ def write_success_artifacts(
         created.append(transcript_path)
         _write_new_text_file(
             evidence_path,
-            json.dumps(evidence.to_dict(), ensure_ascii=False, indent=2) + "\n",
+            json.dumps(evidence.to_dict(), ensure_ascii=False, indent=2, allow_nan=False) + "\n",
         )
         created.append(evidence_path)
     except Exception:
@@ -307,6 +307,6 @@ def write_failure_evidence(output_dir: Path, evidence: RunEvidence) -> Path:
         )
     _write_new_text_file(
         evidence_path,
-        json.dumps(evidence.to_dict(), ensure_ascii=False, indent=2) + "\n",
+        json.dumps(evidence.to_dict(), ensure_ascii=False, indent=2, allow_nan=False) + "\n",
     )
     return evidence_path

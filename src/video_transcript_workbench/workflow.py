@@ -205,11 +205,11 @@ def run_link_transcription(
     All media and intermediate N1 outputs live in a private temporary directory.
     Only the final evidence/transcript pair is written to ``output_dir``.
     """
-    if language not in {"zh", "en", "ja"}:
+    if not isinstance(language, str) or language not in {"zh", "en", "ja"}:
         raise ValueError("language must be one of: zh, en, ja")
     validate_download_limits(max_duration_seconds, max_download_bytes)
-    current_run_id = run_id or uuid.uuid4().hex
-    if not _SAFE_RUN_ID.fullmatch(current_run_id):
+    current_run_id = uuid.uuid4().hex if run_id is None else run_id
+    if not isinstance(current_run_id, str) or not _SAFE_RUN_ID.fullmatch(current_run_id):
         raise ValueError("run_id must contain only letters, numbers, underscores, or hyphens")
 
     destination = Path(output_dir).expanduser().resolve()

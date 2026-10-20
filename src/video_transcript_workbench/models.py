@@ -18,7 +18,17 @@ class Segment:
     text: str
 
     def __post_init__(self) -> None:
-        if not isfinite(self.start) or not isfinite(self.end):
+        finite_times: list[bool] = []
+        for value in (self.start, self.end):
+            try:
+                finite_times.append(
+                    not isinstance(value, bool)
+                    and isinstance(value, (int, float))
+                    and isfinite(float(value))
+                )
+            except (OverflowError, TypeError, ValueError):
+                finite_times.append(False)
+        if not all(finite_times):
             raise SegmentValidationError("segment times must be finite numbers")
         if self.start < 0 or self.end <= self.start:
             raise SegmentValidationError("segment must have 0 <= start < end")
@@ -59,16 +69,37 @@ class RunConfig:
     temperature: float = 0.0
 
     def __post_init__(self) -> None:
-        if not self.model.strip():
+        if not isinstance(self.model, str) or not self.model.strip():
             raise ValueError("model must be explicitly selected")
-        if self.language not in {"zh", "en", "ja", "auto"}:
+        if not isinstance(self.language, str) or self.language not in {
+            "zh", "en", "ja", "auto",
+        }:
             raise ValueError("language must be one of: zh, en, ja, auto")
-        if self.cpu_threads < 1:
+        if (
+            isinstance(self.cpu_threads, bool)
+            or not isinstance(self.cpu_threads, int)
+            or self.cpu_threads < 1
+        ):
             raise ValueError("cpu_threads must be at least 1")
-        if self.beam_size < 1 or self.best_of < 1:
+        if (
+            isinstance(self.beam_size, bool)
+            or not isinstance(self.beam_size, int)
+            or self.beam_size < 1
+            or isinstance(self.best_of, bool)
+            or not isinstance(self.best_of, int)
+            or self.best_of < 1
+        ):
             raise ValueError("beam_size and best_of must be at least 1")
-        if self.temperature < 0:
-            raise ValueError("temperature must not be negative")
+        try:
+            temperature_is_finite = (
+                not isinstance(self.temperature, bool)
+                and isinstance(self.temperature, (int, float))
+                and isfinite(float(self.temperature))
+            )
+        except (OverflowError, TypeError, ValueError):
+            temperature_is_finite = False
+        if not temperature_is_finite or self.temperature < 0:
+            raise ValueError("temperature must be a finite non-negative number")
 
 
 @dataclass(slots=True)
@@ -137,6 +168,30 @@ def validate_segment_sequence(
     tolerance_seconds: float = 0.05,
 ) -> None:
     """Validate existing ASR order; never sort or rewrite original segments."""
+    try:
+        valid_duration = (
+            not isinstance(duration_seconds, bool)
+            and isinstance(duration_seconds, (int, float))
+            and isfinite(float(duration_seconds))
+            and duration_seconds > 0
+        )
+    except (OverflowError, TypeError, ValueError):
+        valid_duration = False
+    if not valid_duration:
+        raise SegmentValidationError("audio duration must be a finite positive number")
+    try:
+        valid_tolerance = (
+            not isinstance(tolerance_seconds, bool)
+            and isinstance(tolerance_seconds, (int, float))
+            and isfinite(float(tolerance_seconds))
+            and tolerance_seconds >= 0
+        )
+    except (OverflowError, TypeError, ValueError):
+        valid_tolerance = False
+    if not valid_tolerance:
+        raise SegmentValidationError(
+            "timeline tolerance must be a finite non-negative number"
+        )
     previous_start = -1.0
     previous_end = -1.0
     for index, segment in enumerate(segments):

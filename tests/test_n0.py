@@ -84,6 +84,30 @@ class InputValidationTests(unittest.TestCase):
             with self.assertRaises(AudioInputError):
                 inspect_audio(source)
 
+    def test_run_config_rejects_non_integral_or_non_finite_controls(self) -> None:
+        invalid_options = (
+            {"cpu_threads": True},
+            {"cpu_threads": 1.5},
+            {"cpu_threads": 0},
+            {"beam_size": False},
+            {"beam_size": 2.5},
+            {"best_of": 0},
+            {"temperature": True},
+            {"temperature": float("nan")},
+            {"temperature": float("inf")},
+            {"temperature": 10**1000},
+        )
+        for options in invalid_options:
+            with self.subTest(options=options):
+                with self.assertRaises(ValueError):
+                    RunConfig(model="small", **options)
+
+    def test_run_config_rejects_non_string_model_and_language(self) -> None:
+        with self.assertRaises(ValueError):
+            RunConfig(model=None)
+        with self.assertRaises(ValueError):
+            RunConfig(model="small", language=None)
+
 
 class ModelSelectionTests(unittest.TestCase):
     def test_accepts_explicit_cached_alias(self) -> None:
@@ -149,6 +173,16 @@ class SegmentAndOutputTests(unittest.TestCase):
                 [Segment(2.5, 3.2, "overrun")],
                 duration_seconds=3.0,
             )
+
+    def test_segment_and_timeline_reject_non_numeric_or_non_finite_values(self) -> None:
+        for start, end in ((True, 1.0), (0.0, "1"), (10**1000, 10**1000 + 1)):
+            with self.subTest(start=start, end=end):
+                with self.assertRaises(SegmentValidationError):
+                    Segment(start, end, "invalid time")
+        for duration in (0, -1, True, float("nan"), float("inf"), "3"):
+            with self.subTest(duration=duration):
+                with self.assertRaises(SegmentValidationError):
+                    validate_segment_sequence([Segment(0.0, 0.5, "x")], duration)
 
     def test_markdown_contains_original_text_and_time_axis(self) -> None:
         raw_text = " 原始文本 punctuation， preserved "
@@ -346,6 +380,33 @@ class EngineBehaviorTests(unittest.TestCase):
             self.assertIn(" 原句一 ", markdown)
             self.assertIn("&lt;script&gt;alert\\(1\\)&lt;/script&gt;", markdown)
             self.assertNotIn("<script>", markdown)
+
+    def test_invalid_model_language_probability_is_written_as_null_json(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            audio = root / "sample.wav"
+            write_test_wav(audio)
+            output = root / "output"
+
+            class FakeModel:
+                def transcribe(self, _samples, **_kwargs):
+                    return iter([SimpleNamespace(start=0.0, end=0.5, text="ok")]), SimpleNamespace(
+                        language="zh", language_probability=float("nan")
+                    )
+
+            _transcript, evidence_path, result = transcribe_to_artifacts(
+                audio,
+                config=RunConfig(model="small", cpu_threads=2),
+                output_dir=output,
+                model_factory=lambda *_args, **_kwargs: FakeModel(),
+                run_id="nan-probability",
+            )
+            raw_json = evidence_path.read_text(encoding="utf-8")
+            evidence = json.loads(raw_json)
+
+        self.assertEqual(result.status, "success")
+        self.assertIsNone(evidence["language"]["probability"])
+        self.assertNotIn("NaN", raw_json)
 
     def test_existing_output_is_not_overwritten(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
