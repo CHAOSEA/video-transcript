@@ -196,6 +196,57 @@ def normalize_video_url(value: str) -> VideoReference:
     )
 
 
+def validate_proxy_url(value: str | None) -> str | None:
+    """Validate a one-run, unauthenticated HTTP(S) proxy override.
+
+    Proxy credentials are deliberately rejected so they cannot leak through process
+    arguments, logs, errors, or evidence. When omitted, yt-dlp keeps its normal
+    environment-based proxy behavior.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value or value != value.strip():
+        raise ValueError("代理地址无效；请提供不含凭据的 HTTP(S) 代理 URL。")
+    if any(character.isspace() or ord(character) < 33 for character in value):
+        raise ValueError("代理地址无效；地址不能包含空白或控制字符。")
+    try:
+        parsed = urlsplit(value)
+        hostname = parsed.hostname
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("代理地址无效；请检查主机名和端口。") from exc
+    if (
+        parsed.scheme.casefold() not in {"http", "https"}
+        or not hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or "%" in parsed.netloc
+        or parsed.path not in {"", "/"}
+        or parsed.query
+        or parsed.fragment
+        or parsed.netloc.endswith(":")
+        or (port is not None and not 1 <= port <= 65535)
+    ):
+        raise ValueError(
+            "代理地址必须是无用户名/密码、无路径/参数的 HTTP(S) 代理 URL。"
+        )
+    try:
+        ipaddress.ip_address(hostname.strip("[]"))
+    except ValueError:
+        try:
+            ascii_hostname = hostname.encode("idna").decode("ascii").rstrip(".")
+        except UnicodeError as exc:
+            raise ValueError("代理地址的主机名无效。") from exc
+        labels = ascii_hostname.split(".")
+        if not ascii_hostname or any(
+            len(label) > 63
+            or not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?", label)
+            for label in labels
+        ):
+            raise ValueError("代理地址的主机名无效。")
+    return f"{parsed.scheme.casefold()}://{parsed.netloc}"
+
+
 def _reference_from_info(reference: VideoReference, info: dict[str, Any]) -> VideoReference:
     """Resolve share links to a same-platform video identity before any download."""
     final_page = info.get("webpage_url") or info.get("original_url")
@@ -375,7 +426,7 @@ def _harden_ytdlp_request_handlers(client: Any, allowed_hosts: tuple[str, ...]) 
         raise RuntimeError("yt-dlp request handlers could not be restricted to safe urllib")
 
 
-def _base_options() -> dict[str, Any]:
+def _base_options(proxy: str | None = None) -> dict[str, Any]:
     # Ignore user yt-dlp configuration and every credential source. No media format
     # is selected and extract_info is always called with download=False.
     options = {
@@ -400,6 +451,9 @@ def _base_options() -> dict[str, Any]:
     node = shutil.which("node")
     if node:
         options["js_runtimes"] = {"node": {"path": node}}
+    validated_proxy = validate_proxy_url(proxy)
+    if validated_proxy is not None:
+        options["proxy"] = validated_proxy
     return options
 
 
@@ -786,6 +840,7 @@ def retrieve_subtitle_to_artifacts(
     output_dir: str | Path,
     client_factory: Callable[[str, dict[str, Any]], Any] | None = None,
     run_id: str | None = None,
+    proxy: str | None = None,
 ) -> dict[str, Any]:
     """Fetch one matching subtitle and save source evidence; never fetch media."""
     evidence = retrieve_subtitle_attempt(
@@ -793,6 +848,7 @@ def retrieve_subtitle_to_artifacts(
         language=language,
         client_factory=client_factory,
         run_id=run_id,
+        proxy=proxy,
     )
     segments = [Segment(**segment) for segment in evidence["segments"]]
     markdown = None
@@ -816,10 +872,12 @@ def retrieve_subtitle_attempt(
     language: str,
     client_factory: Callable[[str, dict[str, Any]], Any] | None = None,
     run_id: str | None = None,
+    proxy: str | None = None,
 ) -> dict[str, Any]:
     """Fetch and classify a subtitle attempt without writing final artifacts."""
     if not isinstance(language, str) or language not in SUPPORTED_LANGUAGES:
         raise ValueError("language must be one of: zh, en, ja")
+    proxy = validate_proxy_url(proxy)
     run_id = uuid.uuid4().hex if run_id is None else run_id
     if not isinstance(run_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", run_id):
         raise ValueError("run_id must contain only letters, numbers, underscores, or hyphens")
@@ -858,7 +916,7 @@ def retrieve_subtitle_attempt(
 
     if reference is not None:
         factory = client_factory or _safe_ytdlp_factory
-        options = _base_options()
+        options = _base_options(proxy)
         try:
             with factory(reference.platform, options) as client:
                 info = client.extract_info(

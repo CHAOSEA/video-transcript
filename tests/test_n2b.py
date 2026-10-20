@@ -33,6 +33,7 @@ from video_transcript_workbench.download import (
 )
 from video_transcript_workbench.models import RunConfig
 from video_transcript_workbench.online import UnsafeNetworkTarget
+from video_transcript_workbench.link_cli import main as link_cli_main
 from video_transcript_workbench.workflow import decide_asr_fallback, run_link_transcription
 
 
@@ -139,11 +140,19 @@ def video_info(*, subtitles: dict | None = None, duration: float = 1.0) -> dict:
 
 
 def fake_download_factory(source: Path | None = None, capture: dict | None = None):
-    def adapter(_url: str, *, directory: Path, max_duration_seconds: int, max_download_bytes: int):
+    def adapter(
+        _url: str,
+        *,
+        directory: Path,
+        max_duration_seconds: int,
+        max_download_bytes: int,
+        proxy: str | None = None,
+    ):
         if capture is not None:
             capture["directory"] = directory
             capture["url"] = _url
             capture["limits"] = (max_duration_seconds, max_download_bytes)
+            capture["proxy"] = proxy
         path = Path(directory) / ("media" + (source.suffix if source else ".wav"))
         if source:
             shutil.copyfile(source, path)
@@ -778,6 +787,21 @@ class WorkflowTests(unittest.TestCase):
     def setUp(self) -> None:
         self.config = RunConfig(model="small", language="zh", cpu_threads=2)
 
+    def test_link_cli_passes_one_run_proxy_override(self) -> None:
+        proxy = "http://127.0.0.1:10809"
+        with tempfile.TemporaryDirectory() as temp, patch(
+            "video_transcript_workbench.link_cli.run_link_transcription",
+            return_value={"status": "failed", "error": {"message": "未完成"}},
+        ) as run_link:
+            result = link_cli_main([
+                "https://www.youtube.com/watch?v=BaW_jenozKc",
+                "--model", "small",
+                "--output-dir", str(Path(temp) / "out"),
+                "--proxy", proxy,
+            ])
+        self.assertEqual(result, 2)
+        self.assertEqual(run_link.call_args.kwargs["proxy"], proxy)
+
     def run_workflow(self, root: Path, info: dict, *, payload: bytes = b"", **kwargs):
         factory, client = subtitle_factory(info, payload)
         result = run_link_transcription(
@@ -852,8 +876,15 @@ class WorkflowTests(unittest.TestCase):
         )
 
     def test_no_subtitles_falls_back_and_preserves_subtitle_failure(self) -> None:
-        factory, client = subtitle_factory(video_info())
+        client = FakeSubtitleClient(video_info())
+        options_seen: dict = {}
+
+        def factory(_platform, options):
+            options_seen.update(options)
+            return client
+
         captured: dict = {}
+        proxy = "http://127.0.0.1:10809"
         with tempfile.TemporaryDirectory() as temp:
             output = Path(temp) / "output"
             result = run_link_transcription(
@@ -864,6 +895,7 @@ class WorkflowTests(unittest.TestCase):
                 subtitle_client_factory=factory,
                 download_adapter=fake_download_factory(capture=captured),
                 asr_runner=fake_asr_success,
+                proxy=proxy,
             )
             evidence = json.loads((output / "evidence.json").read_text(encoding="utf-8"))
             markdown = (output / "transcript.md").read_text(encoding="utf-8")
@@ -873,6 +905,8 @@ class WorkflowTests(unittest.TestCase):
         self.assertTrue(evidence["workflow"]["asr_executed"])
         self.assertEqual(evidence["workflow"]["final_transcription_source"], "local_asr")
         self.assertEqual(evidence["model"], {"requested": "small", "device": "cpu", "compute_type": "int8"})
+        self.assertEqual(options_seen["proxy"], proxy)
+        self.assertEqual(captured["proxy"], proxy)
         self.assertEqual(evidence["download"]["extension"], ".wav")
         self.assertEqual(evidence["segments"][0]["text"], "原始 ASR 文本")
         self.assertIn("local_asr", markdown)

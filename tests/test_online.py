@@ -7,6 +7,7 @@ import tempfile
 import unittest
 import urllib.request
 from pathlib import Path
+from unittest.mock import patch
 
 from video_transcript_workbench.online import (
     OnlineInputError,
@@ -20,8 +21,10 @@ from video_transcript_workbench.online import (
     normalize_video_url,
     parse_subtitle,
     retrieve_subtitle_to_artifacts,
+    retrieve_subtitle_attempt,
     _base_options,
     _safe_ytdlp_factory,
+    validate_proxy_url,
 )
 from video_transcript_workbench.models import Segment
 from video_transcript_workbench.online_cli import main as online_cli_main
@@ -29,6 +32,26 @@ from video_transcript_workbench.link_cli import _local_media_fallback_message
 
 
 class UrlValidationTests(unittest.TestCase):
+    def test_one_run_proxy_override_is_validated_without_credentials(self) -> None:
+        proxy = "http://127.0.0.1:10809"
+        self.assertEqual(validate_proxy_url(proxy), proxy)
+        self.assertEqual(_base_options(proxy)["proxy"], proxy)
+        self.assertNotIn("proxy", _base_options())
+        for invalid in (
+            "socks5://127.0.0.1:1080",
+            "http://user:secret@127.0.0.1:1080",
+            "http://127.0.0.1:1080/path",
+            "http://127.0.0.1:1080/?token=secret",
+            "http://127.0.0.1:70000",
+            "http://proxy.local:",
+            "http://bad host:1080",
+            "http://bad%20host:1080",
+            "not a proxy",
+        ):
+            with self.subTest(proxy=invalid), self.assertRaises(ValueError) as caught:
+                validate_proxy_url(invalid)
+            self.assertNotIn("secret", str(caught.exception))
+
     def test_youtube_query_is_stripped_from_canonical_source(self) -> None:
         result = normalize_video_url("https://youtube.com/watch?v=BaW_jenozKc&list=private&token=secret#t=3")
         self.assertEqual(result.platform, "youtube")
@@ -285,6 +308,47 @@ class FakeYdl:
 
 
 class OnlineRetrievalTests(unittest.TestCase):
+    def test_one_run_proxy_override_reaches_subtitle_extractor_only(self) -> None:
+        info = {
+            "id": "BaW_jenozKc",
+            "title": "safe test title",
+            "duration": 1.0,
+            "extractor_key": "Youtube",
+            "webpage_url": "https://www.youtube.com/watch?v=BaW_jenozKc",
+            "subtitles": {},
+            "automatic_captions": {},
+        }
+        client = FakeYdl(info, b"")
+        options_seen: dict = {}
+
+        def factory(_platform, options):
+            options_seen.update(options)
+            return client
+
+        evidence = retrieve_subtitle_attempt(
+            "https://www.youtube.com/watch?v=BaW_jenozKc",
+            language="zh",
+            client_factory=factory,
+            proxy="http://127.0.0.1:10809",
+        )
+        self.assertEqual(evidence["status"], "no_available_subtitles")
+        self.assertEqual(options_seen["proxy"], "http://127.0.0.1:10809")
+        self.assertNotIn("proxy", evidence)
+
+    def test_online_cli_passes_proxy_override_without_persisting_it(self) -> None:
+        proxy = "http://127.0.0.1:10809"
+        with tempfile.TemporaryDirectory() as temp, patch(
+            "video_transcript_workbench.online_cli.retrieve_subtitle_to_artifacts",
+            return_value={"status": "no_available_subtitles", "error": {"message": "无字幕"}},
+        ) as retrieve:
+            result = online_cli_main([
+                "https://www.youtube.com/watch?v=BaW_jenozKc",
+                "--output-dir", str(Path(temp) / "out"),
+                "--proxy", proxy,
+            ])
+        self.assertEqual(result, 2)
+        self.assertEqual(retrieve.call_args.kwargs["proxy"], proxy)
+
     def test_xiaohongshu_request_token_is_not_written_to_evidence(self) -> None:
         token = "private-share-token"
         url = f"https://www.xiaohongshu.com/explore/6411cf99000000001300b6d9?xsec_token={token}&source=share"

@@ -17,6 +17,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("url", help="HTTPS YouTube、Bilibili、抖音或小红书单视频链接")
     parser.add_argument("--language", default="zh", choices=("zh", "en", "ja"))
     parser.add_argument("--output-dir", required=True, type=Path, help="一个新的输出目录")
+    parser.add_argument(
+        "--proxy",
+        help="仅本次运行使用的 HTTP(S) 代理；不得在地址中填写用户名或密码",
+    )
     return parser
 
 
@@ -27,6 +31,7 @@ def main(argv: list[str] | None = None) -> int:
             args.url,
             language=args.language,
             output_dir=args.output_dir,
+            proxy=args.proxy,
         )
     except (OSError, ValueError) as exc:
         # Never echo the supplied URL or yt-dlp exception text to the console.

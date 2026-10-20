@@ -20,6 +20,7 @@ from .online import (
     _finite_positive_duration,
     _safe_ytdlp_factory,
     normalize_video_url,
+    validate_proxy_url,
     OnlineInputError,
     UnsafeNetworkTarget,
 )
@@ -314,6 +315,7 @@ def download_audio_to_directory(
     max_duration_seconds: int = DEFAULT_MAX_DURATION_SECONDS,
     max_download_bytes: int = DEFAULT_MAX_DOWNLOAD_BYTES,
     client_factory: Callable[[str, dict[str, Any]], Any] | None = None,
+    proxy: str | None = None,
 ) -> DownloadedMedia:
     """Download one audio-only stream to a caller-owned private temp directory.
 
@@ -322,6 +324,7 @@ def download_audio_to_directory(
     subtitle extraction, while yt-dlp's native downloaders avoid external tools.
     """
     validate_download_limits(max_duration_seconds, max_download_bytes)
+    proxy = validate_proxy_url(proxy)
     reference = normalize_video_url(url)
     if reference.video_id is None or reference.extractor_key is None:
         raise DownloadError(
@@ -334,7 +337,7 @@ def download_audio_to_directory(
     if any(target.iterdir()):
         raise DownloadError("下载临时目录必须为空")
 
-    options = _base_options()
+    options = _base_options(proxy)
     options.update(javascript_runtime_options())
     allow_muxed_mp4 = reference.platform == "xiaohongshu"
     options.update({

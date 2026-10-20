@@ -1,6 +1,6 @@
 # Video Transcript
 
-**Video Transcript · Online CLI Beta v0.3.1**<br>
+**Video Transcript · Online CLI Beta v0.3.2**<br>
 [简体中文](README.md) · [Online platform verification matrix](docs/online-support-matrix.md)
 
 Turn supported video links or local media into timestamped transcripts. When usable subtitles are unavailable, the tool can recognize speech locally if the platform permits media retrieval. This gives some videos without captions a local ASR path, subject to platform access.
@@ -56,26 +56,26 @@ The transcript, JSON, and analysis text shown above are **fictional format examp
 
 ## Online platform status
 
-![Platform verification scope: multiple public-video checks, successful paths, and access limits; 104 automated regression tests are counted separately](docs/assets/xhs-03-platform-status.png)
+![Platform verification scope: multiple public-video checks, successful paths, and access limits; automated regression tests are counted separately](docs/assets/xhs-03-platform-status.png)
 
 | Platform and path | Status | Verification |
 |---|---|---|
 | YouTube manual subtitles | PASS | Real retrieval; a fallback subtitle format was verified after a specific format failed. |
 | YouTube automatic subtitles | PASS | Real automatic captions were retrieved and remain marked as automatic in evidence. |
-| YouTube no-subtitle audio → local ASR | PASS (one sample; recheck was blocked) | One video without available subtitles previously completed audio download and CPU/int8 transcription. A 2026-10-20 recheck of the same sample received HTTP 403 before metadata, so ASR did not start. |
+| YouTube no-subtitle audio → local ASR | PASS (completed once; repeatability depends on request context) | The pinned stable version completed the path once through a one-command proxy override. Two stable-version media requests in this run received HTTP 403. The latest nightly downloaded audio, but its full ASR run did not succeed. |
 | Bilibili audio fallback → local ASR | PASS | Real audio-only download and local CPU transcription. |
 | Bilibili subtitle retrieval | Not tested | No real subtitle success sample is available. |
 | Xiaohongshu HTTPS MP4 → local ASR | PASS (one sample) | One public video completed real retrieval and local transcription; this is not a guarantee for other videos. |
 | Xiaohongshu subtitle retrieval | Not tested | No real subtitle-track parsing success has been verified. |
-| Douyin online transcription | Restricted | The current extractor remains access-restricted before metadata. Its “fresh cookies” message does not establish that login is the cause; the tool does not obtain or use credentials. |
+| Douyin online transcription | Restricted | Both yt-dlp stable and official nightly returned a fresh-cookie access challenge before metadata for a public sample. No media download or credential workaround was attempted. |
 
 ### Sample coverage
 
-- YouTube: five distinct public videos were used for subtitle, parser, or media-transfer diagnostics. Manual subtitle retrieval succeeded on two videos and automatic subtitle retrieval on one. One no-subtitle video previously completed audio download and local ASR with yt-dlp 2026.8.19, but a 2026-10-20 recheck of the same video received HTTP 403 before metadata. A different transfer diagnostic also stopped at a platform access check; the recheck is not a new unique sample.
+- YouTube: earlier public samples were used for subtitle, parser, and media-transfer diagnostics. Manual subtitle retrieval succeeded on two videos and automatic subtitle retrieval on one. The pinned stable version previously completed the no-subtitle audio-download and CPU ASR path on an openly licensed public video through a process-level proxy override. Two stable-version media requests in this run received HTTP 403. The latest nightly downloaded audio, but its full ASR run did not succeed. This does not measure recognition accuracy.
 - Bilibili: R0 checked six public videos, and R1 checked three additional public pages for metadata and subtitle tracks. One no-subtitle audio sample completed local ASR; no real subtitle-success sample is available.
 - Xiaohongshu: multiple URL, network, and HTTPS-media diagnostics were run; one public video completed the MP4-to-local-ASR path.
-- Douyin: a public sample was rechecked without credentials using yt-dlp 2026.8.19 and remained access-restricted before metadata; online transcription did not complete.
-- The current 104 automated regression tests are counted separately. They include offline and synthetic cases and do not represent 104 real videos. The 86-test v0.3.0 acceptance is historical.
+- Douyin: one public sample was checked without credentials using yt-dlp 2026.8.19 and official nightly 2026.10.10.233141. Both were blocked by a fresh-cookie challenge before metadata; this does not prove that login is required, and online transcription did not complete.
+- The current worktree passes 108 automated regression tests; the v0.3.0 acceptance historically passed 86. Tests include offline and synthetic cases and do not represent real-video samples.
 
 See the [online support matrix](docs/online-support-matrix.md) for sample coverage and user-visible limitations. Public-video checks, successful paths, and automated regression tests are reported separately. **There is no CER benchmark against human-verified references, so this project makes no model-ranking or universal accuracy claim.**
 
@@ -127,6 +127,14 @@ URL recognition does not mean every link can be processed. Access permissions, s
 
 If an online request is blocked but you already have media saved through a platform-permitted path, continue with the local `video-transcript` command below. The online command does not read browser sessions or bypass access checks.
 
+If your system proxy environment variables point to an unavailable port, pass `--proxy` to override the route for this command only. This does not change Windows proxy settings or environment variables:
+
+~~~powershell
+video-transcript-link "https://www.youtube.com/watch?v=VIDEO_ID" --language zh --model small --output-dir "D:\transcripts\video-run-01" --proxy "http://127.0.0.1:1080"
+~~~
+
+Replace the example port with your local HTTP(S) proxy port. The proxy option is not persisted and does not accept embedded usernames or passwords. When omitted, the command follows the process proxy environment as usual.
+
 ### Subtitles only
 
 ~~~powershell
@@ -134,6 +142,7 @@ video-transcript-online "https://www.youtube.com/watch?v=VIDEO_ID" --language en
 ~~~
 
 This command fetches platform metadata and matching subtitles only. It does not download media or run speech recognition. Supported language preferences are `zh`, `en`, and `ja`.
+If your inherited proxy is unavailable, add `--proxy "http://127.0.0.1:1080"` to use a proxy for this command only.
 
 ## Use local media
 

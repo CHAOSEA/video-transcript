@@ -41,6 +41,7 @@ from .online import (
     _write_online_artifacts,
     normalize_video_url,
     retrieve_subtitle_attempt,
+    validate_proxy_url,
 )
 
 
@@ -199,6 +200,7 @@ def run_link_transcription(
     download_adapter: Callable[..., DownloadedMedia] | None = None,
     asr_runner: Callable[..., Any] | None = None,
     run_id: str | None = None,
+    proxy: str | None = None,
 ) -> dict[str, Any]:
     """Try subtitles first; download and run local ASR only for allowed states.
 
@@ -207,6 +209,7 @@ def run_link_transcription(
     """
     if not isinstance(language, str) or language not in {"zh", "en", "ja"}:
         raise ValueError("language must be one of: zh, en, ja")
+    proxy = validate_proxy_url(proxy)
     validate_download_limits(max_duration_seconds, max_download_bytes)
     current_run_id = uuid.uuid4().hex if run_id is None else run_id
     if not isinstance(current_run_id, str) or not _SAFE_RUN_ID.fullmatch(current_run_id):
@@ -226,6 +229,7 @@ def run_link_transcription(
         language=language,
         client_factory=subtitle_client_factory,
         run_id=f"{current_run_id[:52]}-subtitle",
+        proxy=proxy,
     )
     source_evidence = subtitle_evidence.get("source") or {}
     resolved_url = source_evidence.get("canonical_url")
@@ -290,11 +294,16 @@ def run_link_transcription(
                 runner = asr_runner or transcribe_to_artifacts
                 with tempfile.TemporaryDirectory(prefix="video-transcript-workbench-") as temp_name:
                     private_dir = Path(temp_name).resolve()
+                    download_options = {
+                        "directory": private_dir,
+                        "max_duration_seconds": max_duration_seconds,
+                        "max_download_bytes": max_download_bytes,
+                    }
+                    if proxy is not None:
+                        download_options["proxy"] = proxy
                     downloaded = adapter(
                         reference.request_url or reference.canonical_url,
-                        directory=private_dir,
-                        max_duration_seconds=max_duration_seconds,
-                        max_download_bytes=max_download_bytes,
+                        **download_options,
                     )
                     if not isinstance(downloaded, DownloadedMedia):
                         raise DownloadError("下载适配器没有返回受校验的媒体记录")
