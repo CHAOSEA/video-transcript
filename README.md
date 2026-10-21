@@ -9,6 +9,8 @@ Video Transcript 把已支持平台的视频链接或本地音视频，变成带
 
 命令行会生成 `transcript.md` 和 `evidence.json`，后者记录原始分段、来源和运行参数。分析稿由 Codex 项目 Skill 按你的要求另存为 `analysis.md`，不覆盖逐字稿；单独使用命令行时不会生成分析稿。
 
+![Video Transcript 项目介绍：字幕优先或本地 ASR 转录后，输出文本与证据，供 Agent 分析并沉淀为可检索知识](docs/assets/readme-intro.png)
+
 > Beta 已经过多轮真实平台样本检查和自动化回归。公开支持范围按平台与处理路径披露，不代表所有视频都能处理成功。
 
 ## 项目是什么？怎么使用？
@@ -68,7 +70,7 @@ ASR 推理在运行 CLI 的计算机上完成。若 Agent 要读取私人逐字�
 
 ## 处理流程
 
-![处理流程：字幕优先；没有可用字幕且平台允许时本机 CPU 或 NVIDIA CUDA 识别；Codex 可按需另存分析文稿](docs/assets/xhs-01-workflow.png)
+![Video Transcript 工作流：从视频来源到本地转录、结果输出、Agent 处理与知识沉淀](docs/assets/readme-workflow.png)
 
 流程简述：
 
